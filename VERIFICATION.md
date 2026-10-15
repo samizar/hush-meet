@@ -4,6 +4,7 @@
 
 - Swift 6 build and Xcode Debug and Release application builds succeed on Apple Silicon with the macOS 26 SDK.
 - The release archive is Apple Silicon only, has Hardened Runtime, and verifies with the Developer ID Application certificate for team `ZUT6837GB5`, including Apple's secure signing timestamp.
+- Apple notarization was completed through Xcode's Direct Distribution workflow. The exported application has a valid attached ticket, and Gatekeeper accepts it as `Notarized Developer ID`. The final DMG packages that notarized app and carries a Developer ID signature.
 - Standard automated suite: 95 tests reported passing, including inherited Muesli tests, folder persistence, SQLite full-text search, encryption integrity and migration, audio framing and conversion, calendar rules, template editing, network boundaries and transport errors, and multipage PDF export. Two opt-in integration tests are run separately.
 - Network source audit passes: `NetworkClient` is the only application HTTP implementation. Default provider configuration has an empty host allowlist; unsafe URLs and non-configured hosts are rejected before transport. Error messages omit response bodies.
 - Real Apple Foundation Models integration passes using synthetic meeting speech, producing a summary and action items in about 22 seconds on this development Mac.

@@ -4,6 +4,8 @@ A native, local-first meeting notebook for macOS 26 and Apple Silicon. Swift 6, 
 
 The interface and PDF exports use SF Pro, with quiet paper tones and a single recording accent.
 
+[Download Hush for Apple Silicon](https://github.com/samizar/hush-meet/releases/latest/download/Hush.dmg). Open the disk image and drag Hush to Applications. The app is Developer ID signed and notarized by Apple.
+
 ## Build and run
 
 Requires Xcode 26 with the macOS 26 SDK and an Apple Silicon Mac.
