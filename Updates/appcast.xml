@@ -1,0 +1,38 @@
+<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Hush</title>
+        <item>
+            <title>1.1.0</title>
+            <pubDate>Thu, 15 Oct 2026 14:06:12 +0300</pubDate>
+            <link>https://github.com/samizar/hush-meet/releases</link>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[Hush now receives secure automatic updates from GitHub releases.
+
+### Automatic updates
+
+- Checks daily and downloads updates automatically by default.
+- Verifies a signed update feed and Ed25519-signed downloads before extraction.
+- Installs when Hush quits. Recording, transcription and note generation protect against update restarts.
+- Includes automatic-update controls in General settings and **Check for Updates…** in Settings and the Hush menu.
+- Keeps meeting content and provider keys out of update requests. System profiling stays disabled.
+
+**Coming from Hush 1.0? Install this DMG manually once.** Version 1.0 has no updater; 1.1 and later receive future releases automatically. Open the DMG and drag Hush into Applications, replacing the old app after quitting it. Existing notes and settings stay in their macOS container.
+
+**Requires macOS 26 or later and Apple Silicon.** The app, updater helpers and DMG are Developer ID signed and Apple-notarized. The DMG includes its notarization ticket and a SHA-256 checksum file accompanies the download.
+
+The 100-test suite passes, including five tests covering update checks, meeting protection and restart deferral. Release-specific installation verification is recorded in [VERIFICATION.md](https://github.com/samizar/hush-meet/blob/main/VERIFICATION.md).
+
+Future releases must use the signed publishing workflow documented in the [README](https://github.com/samizar/hush-meet#package-and-release), so automatic-update clients always receive a valid feed and signed payload.
+]]></description>
+            <enclosure url="https://github.com/samizar/hush-meet/releases/download/v1.1.0/Hush.dmg" length="2189543" type="application/octet-stream" sparkle:edSignature="cR0khhh3DRUEUu8NkOAi60J3W664HVmGJ64RxGVoBTxR8/MG4jeBw+wAmD9B+OBlMK3uSOwPBR734ObXEPXTBw=="></enclosure>
+        </item>
+    </channel>
+</rss><!-- sparkle-signatures:
+edSignature: rQrYZVIDOVWFk/w0bHPp1PcOxgCZkYNh14XwAYYcznJya29kf7GfvCY+KY7uLf5Xb5XMzLJmPxLvV10wGh4VDQ==
+length: 2793
+-->
