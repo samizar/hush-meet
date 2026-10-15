@@ -85,7 +85,7 @@ HUSH_NOTARY_PROFILE='your-notary-profile' ./scripts/package.sh
 
 No certificate, password, API key or notarization credential belongs in this repository. Updates are manual in v1. Notarization and its Apple upload occur only when the release operator supplies the profile.
 
-An existing signed-in Xcode account can also notarize without a `notarytool` profile: archive the **Hush** scheme, open the archive in Organizer, and choose **Distribute App → Direct Distribution**. Once Apple approves it, export with `xcodebuild -exportNotarizedApp -archivePath build/Hush.xcarchive -exportPath build/Notarized`. Set `HUSH_APP_SOURCE` to that exported app when packaging to preserve its notarization ticket. The release configuration uses developer team `ZUT6837GB5`.
+An existing signed-in Xcode account can also notarize an app without a `notarytool` profile: archive the **Hush** scheme, open the archive in Organizer, and choose **Distribute App → Direct Distribution**. Once Apple approves it, export the notarized app from Organizer, or use `xcodebuild -exportNotarizedApp` with the archive path managed by Organizer. Set `HUSH_APP_SOURCE` to that exported app when packaging to preserve its notarization ticket. A newly created DMG still needs its own notarization ticket before publication. The release configuration uses developer team `ZUT6837GB5`.
 
 ## Project
 
