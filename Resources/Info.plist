@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleName</key><string>Hush</string>
+    <key>CFBundleDisplayName</key><string>Hush</string>
+    <key>CFBundleIdentifier</key><string>app.hush.mac</string>
+    <key>CFBundleExecutable</key><string>Hush</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleIconFile</key><string>Hush</string>
+    <key>LSMinimumSystemVersion</key><string>26.0</string>
+    <key>LSUIElement</key><true/>
+    <key>LSArchitecturePriority</key><array><string>arm64</string></array>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSMicrophoneUsageDescription</key><string>Hush records your side of a meeting to make private notes on this Mac.</string>
+    <key>NSAudioCaptureUsageDescription</key><string>Hush records the other side of your call on a separate audio track.</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Hush transcribes your meetings on this Mac using Apple's speech model.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key><string>Hush reads meeting times from Calendar to offer a reminder before calls. Hush never changes your events.</string>
+    <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Hush. Includes MIT-licensed Muesli components by alimuqeem.</string>
+</dict></plist>

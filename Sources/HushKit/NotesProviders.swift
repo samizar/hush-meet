@@ -1,0 +1,135 @@
+import Foundation
+import FoundationModels
+import MuesliCore
+
+public protocol NotesProvider: NotesGenerator {}
+
+public struct AppleNotesProvider: NotesProvider {
+    public init() {}
+    public var displayName: String { "Apple on-device" }
+    public var transcriptCharacterBudget: Int { get async { 3_600 } }
+    public static var unavailableReason: String? {
+        switch SystemLanguageModel.default.availability {
+        case .available: nil
+        case .unavailable(.appleIntelligenceNotEnabled): "Turn on Apple Intelligence in System Settings to write notes on this Mac."
+        case .unavailable(.modelNotReady): "Apple's notes model is still getting ready. Try again after it finishes downloading."
+        case .unavailable(.deviceNotEligible): "This Mac doesn't support Apple's on-device notes model. Choose another provider in Settings."
+        case .unavailable: "Apple's on-device notes model isn't available right now. Your transcript is saved."
+        }
+    }
+    public func preflight() async throws {
+        if let reason = Self.unavailableReason { throw HushError.message(reason) }
+    }
+    public func generate(system: String, user: String) async throws -> GenerationResult {
+        try await preflight()
+        let schema = try GenerationSchema(root: Self.dynamic(HushNotesSchema.root), dependencies: [])
+        let session = LanguageModelSession(instructions: system)
+        let result = try await session.respond(to: user, schema: schema,
+                                              options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 800))
+        return GenerationResult(notes: try GeneratedNotes.parse(result.content.jsonString))
+    }
+    private static func dynamic(_ node: SchemaNode) -> DynamicGenerationSchema {
+        switch node {
+        case .string: DynamicGenerationSchema(type: String.self)
+        case .integer: DynamicGenerationSchema(type: Int.self)
+        case .array(let item): DynamicGenerationSchema(arrayOf: dynamic(item))
+        case .object(let name, let properties):
+            DynamicGenerationSchema(name: name, properties: properties.map {
+                .init(name: $0.name, description: $0.description, schema: dynamic($0.node))
+            })
+        }
+    }
+}
+
+public struct CloudNotesProvider: NotesProvider {
+    public let configuration: ProviderConfiguration
+    private let client: NetworkClient
+    public init(configuration: ProviderConfiguration) {
+        self.configuration = configuration; client = NetworkClient(allowedHosts: configuration.allowedHosts)
+    }
+    public var displayName: String { configuration.notes.name + ":" + configuration.resolvedModel }
+    public var transcriptCharacterBudget: Int { get async { configuration.notes == .compatible ? 10_000 : 30_000 } }
+    public func preflight() async throws {
+        guard configuration.notes != .apple, !configuration.resolvedModel.isEmpty else { throw HushError.message("Enter a notes model in Settings → Models.") }
+        if configuration.notes != .compatible { _ = try requiredKey() }
+        if configuration.notes == .compatible {
+            guard let url = URL(string: configuration.compatibleURL) else { throw HushError.message("Enter a valid HTTPS server address.") }
+            try NetworkClient.validate(url, allowedHosts: configuration.allowedHosts)
+        }
+    }
+    private func requiredKey() throws -> String {
+        guard let key = try Secrets.get(configuration.notes.rawValue), !key.isEmpty else { throw HushError.message("Add your \(configuration.notes.name) key in Settings → Models.") }
+        return key
+    }
+    public func generate(system: String, user: String) async throws -> GenerationResult {
+        try await preflight()
+        let schema = try JSONSerialization.jsonObject(with: HushNotesSchema.root.jsonSchema().data())
+        let data: Data
+        let text: String
+        switch configuration.notes {
+        case .apple: throw HushError.message("Choose a cloud notes provider first.")
+        case .anthropic:
+            data = try await client.json(url: URL(string: "https://api.anthropic.com/v1/messages")!, body: [
+                "model": configuration.resolvedModel, "max_tokens": 3000, "system": system,
+                "messages": [["role": "user", "content": user]],
+                "output_config": ["format": ["type": "json_schema", "schema": schema]]
+            ], headers: ["x-api-key": try requiredKey(), "anthropic-version": "2023-06-01"])
+            let json = try Self.object(data)
+            text = (json["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined() ?? ""
+        case .openai, .compatible:
+            let base = configuration.notes == .openai ? URL(string: "https://api.openai.com/v1")! : URL(string: configuration.compatibleURL)!
+            var headers: [String: String] = [:]
+            if let key = try Secrets.get(configuration.notes.rawValue), !key.isEmpty { headers["Authorization"] = "Bearer " + key }
+            var body: [String: Any] = [
+                "model": configuration.resolvedModel,
+                "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
+                "response_format": ["type": "json_schema", "json_schema": ["name": "meeting_notes", "strict": true, "schema": schema]]
+            ]
+            body[configuration.notes == .compatible ? "max_tokens" : "max_completion_tokens"] = 3000
+            data = try await client.json(url: base.appendingPathComponent("chat/completions"), body: body, headers: headers)
+            let choices = try Self.object(data)["choices"] as? [[String: Any]]
+            text = (choices?.first?["message"] as? [String: Any])?["content"] as? String ?? ""
+        case .gemini:
+            let model = configuration.resolvedModel.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._"))) ?? ""
+            data = try await client.json(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent")!, body: [
+                "systemInstruction": ["parts": [["text": system]]],
+                "contents": [["parts": [["text": user]]]],
+                "generationConfig": ["responseMimeType": "application/json", "responseJsonSchema": schema]
+            ], headers: ["x-goog-api-key": try requiredKey()])
+            text = try Self.geminiText(data)
+        }
+        do { return GenerationResult(notes: try GeneratedNotes.parse(text)) }
+        catch { throw HushError.message("The provider returned incomplete notes. Your transcript is saved; try again.") }
+    }
+    static func object(_ data: Data) throws -> [String: Any] {
+        guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw HushError.message("The provider response couldn't be read.") }
+        return result
+    }
+    static func geminiText(_ data: Data) throws -> String {
+        let json = try object(data)
+        let candidate = (json["candidates"] as? [[String: Any]])?.first
+        let parts = (candidate?["content"] as? [String: Any])?["parts"] as? [[String: Any]]
+        return parts?.compactMap { $0["text"] as? String }.joined() ?? ""
+    }
+}
+
+/// Preserves Muesli's chunk-and-merge pipeline and applies the selected template to every generation pass.
+public struct TemplateNotesProvider: NotesGenerator {
+    public let base: any NotesGenerator
+    public let instruction: String
+    public init(base: any NotesGenerator, instruction: String) { self.base = base; self.instruction = instruction }
+    public var displayName: String { base.displayName }
+    public var transcriptCharacterBudget: Int { get async { await base.transcriptCharacterBudget } }
+    public func preflight() async throws { try await base.preflight() }
+    public func generate(system: String, user: String) async throws -> GenerationResult {
+        try await base.generate(system: system + "\nTemplate guidance: " + String(instruction.prefix(1200)), user: user)
+    }
+}
+
+// One schema for Apple guided generation and every cloud structured-output request.
+public enum HushNotesSchema {
+    public static let root: SchemaNode = {
+        guard case .object(let name, let properties) = NotesSchema.root else { return NotesSchema.root }
+        return .object(name: name, properties: properties.filter { !["events", "emailDrafts"].contains($0.name) })
+    }()
+}
