@@ -233,6 +233,10 @@ struct MeetingPage: View {
         VStack(alignment: .leading, spacing: DesignTokens.gap) {
             Text(meeting.state == .transcribing ? "Finishing the transcript…" : "Writing notes…").font(DesignTokens.body).foregroundStyle(DesignTokens.soft)
             ProgressView().progressViewStyle(.linear).tint(DesignTokens.soft)
+            if state.canCancelProcessing {
+                Button("Cancel processing") { state.cancelProcessing() }.buttonStyle(QuietButtonStyle())
+                Text("Your saved recording and transcript will be kept.").font(DesignTokens.small).foregroundStyle(DesignTokens.soft)
+            }
         }
     }
     private var failureBody: some View {

@@ -31,6 +31,7 @@ public final class CaptureSession {
     @ObservationIgnored private var failures: [String] = []
     @ObservationIgnored private var recorders: [Speaker: StreamRecorder] = [:]
     @ObservationIgnored private var sessionEpoch: UInt64 = 0
+    @ObservationIgnored private var generation = UUID()
     public var audioOffsets: [String: TimeInterval] {
         Dictionary(uniqueKeysWithValues: recorders.compactMap { speaker, recorder in
             recorder.firstHostTime.map { (speaker.rawValue, max(0, HostClock.seconds(from: sessionEpoch, to: $0))) }
@@ -44,6 +45,7 @@ public final class CaptureSession {
     public func start(meeting: Meeting, preferences: Preferences, folder: URL) async throws {
         guard !isRecording && !isPreparing else { return }
         isPreparing = true; warning = nil; progressText = "Getting ready…"; failures = []; recorders = [:]
+        let generation = UUID(); self.generation = generation
         var downloadTask: Task<Void, Never>?
         defer { downloadTask?.cancel(); isPreparing = false; progressText = "" }
         let locale: Locale
@@ -69,10 +71,11 @@ public final class CaptureSession {
         let system = SystemAudioCapture(scope: preferences.captureAllApps ? .everything : .only(AppSelector(preferences.captureApps)))
         system.onUpdate = { [weak self] update in
             Task { @MainActor in
+                guard let self, self.generation == generation else { return }
                 switch update {
-                case .failed: self?.warning = "System audio stopped. Check System Settings → Privacy & Security → Screen & System Audio Recording."
-                case .waiting: self?.warning = "Waiting for a selected call app."
-                case .following: self?.warning = nil
+                case .failed: self.warning = "System audio stopped. Check System Settings → Privacy & Security → Screen & System Audio Recording."
+                case .waiting: self.warning = "Waiting for a selected call app."
+                case .following: self.warning = nil
                 }
             }
         }
@@ -80,60 +83,88 @@ public final class CaptureSession {
             let micStream = try await mic.start()
             let systemStream = try system.start()
             self.mic = mic; self.system = system
-            let epoch = HostClock.now()
-            sessionEpoch = epoch
-            startedAt = .now; transcript?.startedAt = startedAt!; lastHeardThem = .now
-            meLevels = Array(repeating: 0, count: 96); themLevels = meLevels
-            for (speaker, source) in [(Speaker.me, micStream), (.them, systemStream)] {
-                let recorder = try StreamRecorder(url: folder.appendingPathComponent(speaker.rawValue + ".wav"))
-                recorders[speaker] = recorder
-                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: recorder.url.path)
-                let (stream, continuation) = AsyncStream.makeStream(of: AudioChunk.self)
-                audioTasks.append(Task.detached { [weak self] in
-                    var lastMeter: UInt64 = 0
-                    for await chunk in source {
-                        do { try recorder.write(chunk) }
-                        catch { await self?.captureFailed("Couldn't save audio. Check available disk space.") }
-                        if lastMeter == 0 || HostClock.seconds(from: lastMeter, to: chunk.hostTime) > 0.08 {
-                            lastMeter = chunk.hostTime
-                            let level = Self.level(chunk)
-                            await self?.meter(level, speaker: speaker)
-                        }
-                        if preferences.providers.transcription == .apple { continuation.yield(chunk) }
-                    }
-                    recorder.finish(); continuation.finish()
-                })
-                if preferences.providers.transcription == .apple {
-                    let transcriber = StreamTranscriber(speaker: speaker, locale: locale, sessionStart: epoch)
-                    tasks.append(Task { [weak self] in
-                        do {
-                            for try await segment in transcriber.transcribe(stream, onUpdate: { [weak self] segment, final in
-                                Task { @MainActor in
-                                    if speaker == .me { self?.volatileMe = final ? "" : segment.text }
-                                    else { self?.volatileThem = final ? "" : segment.text }
-                                }
-                            }) {
-                                self?.transcript?.append(segment)
-                            }
-                        } catch { self?.captureFailed("Transcription stopped: " + error.localizedDescription) }
-                    })
-                }
-            }
-            isRecording = true
+            try consume([(Speaker.me, micStream), (.them, systemStream)], locale: locale, preferences: preferences, folder: folder)
         } catch {
             mic.stop(); system.stop()
             for task in audioTasks { await task.value }
             for task in tasks { task.cancel() }
+            self.generation = UUID()
             self.mic = nil; self.system = nil; tasks = []; audioTasks = []
             throw error
         }
     }
+    /// Shared recording/transcription pipeline for live capture and synthetic-file regression tests.
+    func consume(_ sources: [(Speaker, AsyncStream<AudioChunk>)], locale: Locale, preferences: Preferences, folder: URL) throws {
+        let generation = self.generation
+        let epoch = HostClock.now()
+        sessionEpoch = epoch
+        startedAt = .now; transcript = Transcript(startedAt: startedAt!, locale: locale.identifier); lastHeardThem = .now
+        meLevels = Array(repeating: 0, count: 96); themLevels = meLevels
+        for (speaker, source) in sources {
+            let recorder = try StreamRecorder(url: folder.appendingPathComponent(speaker.rawValue + ".wav"))
+            recorders[speaker] = recorder
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: recorder.url.path)
+            let (stream, continuation) = AsyncStream.makeStream(of: AudioChunk.self)
+            audioTasks.append(Task.detached { [weak self] in
+                var lastMeter: UInt64 = 0
+                for await chunk in source {
+                    do { try recorder.write(chunk) }
+                    catch { await self?.captureFailed("Couldn't save audio. Check available disk space.", generation: generation) }
+                    if lastMeter == 0 || HostClock.seconds(from: lastMeter, to: chunk.hostTime) > 0.08 {
+                        lastMeter = chunk.hostTime
+                        let level = Self.level(chunk)
+                        await self?.meter(level, speaker: speaker, generation: generation)
+                    }
+                    if preferences.providers.transcription == .apple { continuation.yield(chunk) }
+                }
+                recorder.finish(); continuation.finish()
+            })
+            if preferences.providers.transcription == .apple {
+                let transcriber = StreamTranscriber(speaker: speaker, locale: locale, sessionStart: epoch)
+                tasks.append(Task { [weak self] in
+                    do {
+                        for try await segment in transcriber.transcribe(stream, onUpdate: { [weak self] segment, final in
+                            Task { @MainActor in
+                                guard let self, self.generation == generation else { return }
+                                if speaker == .me { self.volatileMe = final ? "" : segment.text }
+                                else { self.volatileThem = final ? "" : segment.text }
+                            }
+                        }) {
+                            guard let self, self.generation == generation else { return }
+                            self.transcript?.append(segment)
+                        }
+                    } catch {
+                        if !(error is CancellationError) { self?.captureFailed("Transcription stopped: " + error.localizedDescription, generation: generation) }
+                    }
+                })
+            }
+        }
+        isRecording = true
+        DiagnosticLog.shared.record(.captureStarted)
+    }
     public func stop() async throws -> Transcript {
+        DiagnosticLog.shared.record(.stopRequested)
         isRecording = false
         mic?.stop(); system?.stop(); mic = nil; system = nil
+        defer {
+            for task in tasks { task.cancel() }
+            generation = UUID()
+            audioTasks = []; tasks = []; volatileMe = ""; volatileThem = ""
+        }
+        // Always finish the saved WAVs before returning or protecting them.
         for task in audioTasks { await task.value }
-        for task in tasks { await task.value }
-        audioTasks = []; tasks = []; volatileMe = ""; volatileThem = ""
+        DiagnosticLog.shared.record(.audioDrained)
+        let speechTasks = tasks
+        do {
+            try await AsyncDeadline.run(for: .seconds(20)) {
+                for task in speechTasks { await task.value }
+            }
+            try Task.checkCancellation()
+        } catch {
+            if error is AsyncDeadline.TimedOut { DiagnosticLog.shared.record(.speechTimedOut) }
+            throw error
+        }
+        DiagnosticLog.shared.record(.speechFinished, count: transcript?.segments.count ?? 0)
         if let failure = failures.first { throw HushError.message(failure) }
         return transcript ?? Transcript(locale: Locale.current.identifier)
     }
@@ -144,10 +175,12 @@ public final class CaptureSession {
             warning = "Couldn't hear the other side. Allow Hush in System Settings → Privacy & Security → Screen & System Audio Recording, then restart recording."
         }
     }
-    private func captureFailed(_ message: String) {
+    private func captureFailed(_ message: String, generation: UUID) {
+        guard self.generation == generation else { return }
         if !failures.contains(message) { failures.append(message) }; warning = message
     }
-    private func meter(_ value: Double, speaker: Speaker) {
+    private func meter(_ value: Double, speaker: Speaker, generation: UUID) {
+        guard self.generation == generation else { return }
         if speaker == .me { meLevels.removeFirst(); meLevels.append(value) }
         else {
             themLevels.removeFirst(); themLevels.append(value)

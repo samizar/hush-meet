@@ -54,6 +54,8 @@ final class AppState {
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var scopedURL: URL?
+    @ObservationIgnored private var processingTask: Task<Void, Never>?
+    var canCancelProcessing: Bool { processingTask != nil && busy && !capture.isRecording }
     var selected: Meeting? { meetings.first { $0.id == selectedID } }
     var current: Meeting? { meetings.first { $0.id == currentID } }
     var filteredMeetings: [Meeting] { searchIDs.map { ids in meetings.filter { ids.contains($0.id) } } ?? meetings }
@@ -172,10 +174,10 @@ final class AppState {
         guard capture.isRecording, let id = currentID, let store else { return }
         busy = true; recordingChanged?(false)
         update(id) { $0.endedAt = .now; $0.userNotes = liveNotes; $0.state = .transcribing }
-        Task {
+        processingTask = Task {
+            defer { currentID = nil; activeEvent = nil; busy = false; processingTask = nil }
             do {
-                guard let snapshot = meetings.first(where: { $0.id == id }) else { return }
-                try await store.save(snapshot, transcript: capture.transcript)
+                guard let snapshot = meetings.first(where: { $0.id == id }) else { throw HushError.message("This meeting couldn't be found.") }
                 var transcript = try await capture.stop()
                 update(id) { $0.audioOffsets = capture.audioOffsets }
                 if preferences.providers.transcription != .apple {
@@ -185,14 +187,18 @@ final class AppState {
                 try await finishTranscription(id: id, transcript: transcript)
                 try await generate(id)
             } catch { await fail(id, error) }
-            currentID = nil; activeEvent = nil; busy = false
             storageSize = await store.size()
         }
+    }
+    func cancelProcessing() {
+        guard canCancelProcessing else { return }
+        processingTask?.cancel()
     }
     private func transcribeFiles(id: UUID, meeting: Meeting) async throws -> Transcript {
         guard let store else { throw HushError.message("The meeting store isn't ready.") }
         var transcript = Transcript(startedAt: meeting.startedAt, locale: meeting.locale)
         for speaker in [Speaker.me, .them] {
+            try Task.checkCancellation()
             let offset = meeting.audioOffsets?[speaker.rawValue] ?? 0
             guard let bytes = try await store.audioData(id, name: speaker.rawValue + ".wav"), bytes.count > 44 else { continue }
             let temporary = await store.folder(id).appendingPathComponent(".retry-" + speaker.rawValue + ".wav")
@@ -201,7 +207,12 @@ final class AppState {
             defer { try? FileManager.default.removeItem(at: temporary) }
             if preferences.providers.transcription == .apple {
                 let locale = try await StreamTranscriber.prepare(locale: Locale(identifier: meeting.locale))
-                for try await segment in StreamTranscriber(speaker: speaker, locale: locale).transcribe(try AudioFileSource.chunks(url: temporary)) {
+                let segments = try await AsyncDeadline.run(for: .seconds(max(60, meeting.duration * 2))) {
+                    var result: [TranscriptSegment] = []
+                    for try await segment in StreamTranscriber(speaker: speaker, locale: locale).transcribe(try AudioFileSource.chunks(url: temporary)) { result.append(segment) }
+                    return result
+                }
+                for segment in segments {
                     var aligned = segment; aligned.start += offset; aligned.end += offset; transcript.append(aligned)
                 }
             } else {
@@ -216,6 +227,7 @@ final class AppState {
         return transcript
     }
     private func finishTranscription(id: UUID, transcript: Transcript) async throws {
+        try Task.checkCancellation()
         guard let store else { return }
         update(id) { $0.transcriptionFinal = true; $0.state = .writing; $0.failure = nil }
         if let meeting = meetings.first(where: { $0.id == id }) { try await store.save(meeting, transcript: transcript) }
@@ -231,9 +243,11 @@ final class AppState {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         busy = true
-        Task {
+        DiagnosticLog.shared.record(.retryStarted)
+        processingTask = Task {
+            defer { busy = false; processingTask = nil }
             do {
-                guard let meeting = meetings.first(where: { $0.id == id }) else { busy = false; return }
+                guard let meeting = meetings.first(where: { $0.id == id }) else { return }
                 if !meeting.transcriptionFinal {
                     update(id) { $0.state = .transcribing }
                     let transcript = try await transcribeFiles(id: id, meeting: meeting)
@@ -241,7 +255,6 @@ final class AppState {
                 }
                 try await generate(id)
             } catch { await fail(id, error) }
-            busy = false
         }
     }
     func changeTemplate(_ templateID: String, for id: UUID) {
@@ -259,9 +272,14 @@ final class AppState {
         templates = try Templates.load()
         guard let template = templates.first(where: { $0.id == meeting.templateID }) ?? templates.first else { throw HushError.message("No note template is available.") }
         let provider: any NotesGenerator = preferences.providers.notes == .apple ? AppleNotesProvider() : CloudNotesProvider(configuration: preferences.providers)
-        try await provider.preflight()
-        let result = try await MeetingSummarizer(generator: TemplateNotesProvider(base: provider, instruction: template.instruction), enforceMergeBudget: true).summarize(transcript,
-            context: MeetingContext(title: meeting.title, start: meeting.startedAt, userNotes: meeting.userNotes))
+        let context = MeetingContext(title: meeting.title, start: meeting.startedAt, userNotes: meeting.userNotes)
+        DiagnosticLog.shared.record(.notesStarted)
+        let result = try await AsyncDeadline.run(for: .seconds(120)) {
+            try await provider.preflight()
+            return try await MeetingSummarizer(generator: TemplateNotesProvider(base: provider, instruction: template.instruction), enforceMergeBudget: true).summarize(transcript, context: context)
+        }
+        try Task.checkCancellation()
+        DiagnosticLog.shared.record(.notesFinished)
         meeting.structuredNotes = result.notes; meeting.title = result.notes.title
         meeting.state = .ready; meeting.failure = nil
         let text = template.render(result.notes)
@@ -271,12 +289,14 @@ final class AppState {
         notify(title: "Notes ready", body: "Your meeting notes are waiting in Hush.", id: id.uuidString)
     }
     private func fail(_ id: UUID, _ error: Error) async {
-        update(id) { $0.state = .failed; $0.failure = error.localizedDescription }
+        DiagnosticLog.shared.record(error is CancellationError ? .processingCancelled : .processingFailed, error: error)
+        let message = error is CancellationError ? "Processing cancelled. Your saved recording and transcript have been kept. Retry when you're ready." : error.localizedDescription
+        update(id) { $0.state = .failed; $0.failure = message }
         if let meeting = meetings.first(where: { $0.id == id }) {
             try? await store?.save(meeting, transcript: !meeting.transcriptionFinal && capture.transcript?.startedAt == meeting.startedAt ? capture.transcript : nil)
             try? await store?.protectAudio(id)
         }
-        notice = error.localizedDescription
+        notice = message
     }
     func update(_ id: UUID, _ body: (inout Meeting) -> Void) {
         guard let index = meetings.firstIndex(where: { $0.id == id }) else { return }; body(&meetings[index])

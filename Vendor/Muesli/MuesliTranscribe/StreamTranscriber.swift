@@ -85,71 +85,72 @@ public struct StreamTranscriber: Sendable {
     }
 
     private func run(_ chunks: AsyncStream<AudioChunk>, into out: AsyncThrowingStream<TranscriptSegment, Error>.Continuation, onUpdate: @escaping @Sendable (TranscriptSegment, Bool) -> Void) async throws {
+        // A selected call app may produce no buffers at all. Do not start a recognizer
+        // for that channel: finishing an analyzer with no consumed input can wait forever.
+        var firstIterator = chunks.makeAsyncIterator()
+        guard let first = await firstIterator.next() else { return }
+        try Task.checkCancellation()
         let transcriber = Self.makeTranscriber(locale: locale)
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         guard let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw TranscribeError.noAudioFormat
         }
-
-        let (inputs, inputContinuation) = AsyncStream.makeStream(of: AnalyzerInput.self, bufferingPolicy: .unbounded)
-        try await analyzer.start(inputSequence: inputs)
-
-        // Analyzer time starts at 0 with this stream's first buffer; this is
-        // how far after the *session* start that was.
-        let offset = OSAllocatedUnfairLock(initialState: TimeInterval(0))
+        let (inputs, inputContinuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
+        let offset = sessionStart.map { first.hostTime == 0 ? 0 : HostClock.seconds(from: $0, to: first.hostTime) } ?? 0
         let speaker = self.speaker
-        let sessionStart = self.sessionStart
-
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask {
-                for try await result in transcriber.results {
-                    let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { continue }
-                    let base = offset.withLock { $0 }
-                    let start = base + result.range.start.seconds
-                    let end = base + result.range.end.seconds
-                    let segment = TranscriptSegment(
-                        speaker: speaker,
-                        start: start,
-                        end: max(end, start),
-                        text: text,
-                        confidence: Self.meanConfidence(result.text)
-                    )
-                    onUpdate(segment, result.isFinal)
-                    if result.isFinal { out.yield(segment) }
-                }
-            }
-
-            group.addTask {
-                var converter: PCMConverter?
-                var sawFirst = false
-                for await chunk in chunks {
-                    if !sawFirst {
-                        sawFirst = true
-                        if let sessionStart, chunk.hostTime != 0 {
-                            offset.withLock { $0 = HostClock.seconds(from: sessionStart, to: chunk.hostTime) }
-                        }
+        let log = Logger(subsystem: "app.hush.mac", category: "speech")
+        log.info("speech_started channel=\(speaker.rawValue, privacy: .public)")
+        try await withTaskCancellationHandler {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    for try await result in transcriber.results {
+                        let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !text.isEmpty else { continue }
+                        let start = offset + result.range.start.seconds
+                        let segment = TranscriptSegment(speaker: speaker, start: start,
+                            end: max(offset + result.range.end.seconds, start), text: text,
+                            confidence: Self.meanConfidence(result.text))
+                        onUpdate(segment, result.isFinal)
+                        if result.isFinal { out.yield(segment) }
                     }
-                    if converter == nil || converter?.inputFormat != chunk.buffer.format {
-                        do {
+                }
+                group.addTask {
+                    defer { inputContinuation.finish() }
+                    var converter: PCMConverter?
+                    func supply(_ chunk: AudioChunk) throws {
+                        if converter == nil || converter?.inputFormat != chunk.buffer.format {
+                            if let tail = try converter?.flush() { inputContinuation.yield(AnalyzerInput(buffer: tail)) }
                             converter = try PCMConverter(from: chunk.buffer.format, to: analyzerFormat)
-                        } catch {
-                            throw TranscribeError.conversion(error.localizedDescription)
                         }
+                        if let buffer = try converter?.convert(chunk.buffer) { inputContinuation.yield(AnalyzerInput(buffer: buffer)) }
                     }
-                    do {
-                        if let converted = try converter?.convert(chunk.buffer) {
-                            inputContinuation.yield(AnalyzerInput(buffer: converted))
-                        }
-                    } catch {
-                        throw TranscribeError.conversion(error.localizedDescription)
-                    }
+                    try supply(first)
+                    // Only one iterator consumes chunks at a time: the first read above is complete.
+                    for await chunk in chunks { try Task.checkCancellation(); try supply(chunk) }
+                    try Task.checkCancellation()
+                    if let tail = try converter?.flush() { inputContinuation.yield(AnalyzerInput(buffer: tail)) }
+                    log.info("speech_input_ended channel=\(speaker.rawValue, privacy: .public)")
                 }
-                inputContinuation.finish()
-                try await analyzer.finalizeAndFinishThroughEndOfInput()
+                group.addTask {
+                    // Structured analysis supplies the actual final time, including the empty-input case.
+                    let last = try await analyzer.analyzeSequence(inputs)
+                    try Task.checkCancellation()
+                    if let last {
+                        try await AsyncDeadline.run(for: .seconds(15)) { try await analyzer.finalizeAndFinish(through: last) }
+                    } else { await analyzer.cancelAndFinishNow() }
+                    log.info("speech_finished channel=\(speaker.rawValue, privacy: .public)")
+                }
+                do { while try await group.next() != nil {} }
+                catch {
+                    group.cancelAll(); inputContinuation.finish()
+                    Task { await analyzer.cancelAndFinishNow() }
+                    log.error("speech_failed channel=\(speaker.rawValue, privacy: .public) code=\((error as NSError).code)")
+                    throw error
+                }
             }
-
-            try await group.waitForAll()
+        } onCancel: {
+            inputContinuation.finish()
+            Task { await analyzer.cancelAndFinishNow() }
         }
     }
 

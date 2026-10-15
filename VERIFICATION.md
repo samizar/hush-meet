@@ -23,6 +23,16 @@
 - After promotion to the latest stable release, Sparkle's read-only probe discovered 1.1.0 through the exact stable feed URL embedded in the app. A fresh download of the public release passes its SHA-256 checksum, Ed25519 payload verification, stapler validation and Gatekeeper assessment.
 - The updater tests cover meeting/restart guards separately from the real installer rehearsal. This does not replace the live-call/device and provider acceptance checks below.
 
+## Recording recovery release v1.1.1
+
+- Diagnosed a stopped recording with a nonempty microphone WAV and a zero-frame other-side WAV, using state, file sizes and frame counts only. The previous empty-channel recognizer regression did not finish within a bounded 25-second run.
+- Speech analyzers now start only after their first audio buffer. Structured analysis finalizes at the last consumed sample; empty inputs cancel immediately. Converter tails are flushed, native recognizers are cancelled on failure, and the recording session bounds its final speech wait at 20 seconds.
+- Real Apple Speech regression passes: a synthetic microphone recording plus an empty other-side channel drains both WAVs and finalizes a nonempty Me transcript in approximately 0.7 seconds. Empty input, a 0.1-second silent input, cancellation before the first buffer, and two simultaneous spoken channels also pass. No private meeting speech was used.
+- All 112 tests pass with both real Apple Speech and Foundation Models integrations enabled. Synthetic notes generation completes in approximately 10 seconds. The final standard suite and network boundary audit also pass.
+- Processing cleanup releases controls after failure, cancellation and missing-meeting paths. Notes generation and file transcription have deadlines; late callbacks are fenced by capture generation. Users can cancel processing while retaining saved files.
+- Both model buttons were clicked in an isolated app preview: Apple Speech reported readiness for English (Finland), and on-device notes generated a sample successfully with visible progress and an inline success result.
+- The Models tab explains why settings are temporarily unavailable during a meeting. Apple Speech readiness and actual on-device notes generation show local progress, bounded execution and inline results. Privacy settings expose local rotating diagnostics, limited to fixed events and numerical metadata. Tests verify content exclusion, private permissions and two-file rotation.
+
 ## Requires device/account acceptance testing
 
 - A real two-sided call with microphone and System Audio Recording permissions, including headphones, selected call-app scope, silence hint, and device changes. Automated tests intentionally do not record private conversations or grant TCC access.
