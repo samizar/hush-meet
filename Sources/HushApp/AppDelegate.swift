@@ -53,7 +53,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard state.preventsUpdateRestart else { return .terminateNow }
+        if !state.hasActiveMeetingWork {
+            guard !state.sideNotesSaving.isEmpty || !state.sideNotesSaveErrors.isEmpty else { return .terminateNow }
+            Task {
+                let saved = await state.flushSideNotes()
+                if !saved { state.notice = "Your side notes couldn't be saved. Keep Hush open and try saving them again."; openMain() }
+                sender.reply(toApplicationShouldTerminate: saved)
+            }
+            return .terminateLater
+        }
         let alert = NSAlert(); alert.messageText = "Hush is still working"
         alert.informativeText = "Stop the recording and wait for notes to finish before quitting."
         alert.addButton(withTitle: "Keep Hush open"); alert.runModal()

@@ -26,6 +26,8 @@ final class AppState {
     var currentID: UUID?
     var elapsed: TimeInterval = 0
     var liveNotes = ""
+    var sideNotesSaving = Set<UUID>()
+    var sideNotesSaveErrors: [UUID: String] = [:]
     var activeEvent: CalendarMeeting?
     var storageSize: Int64 = 0
     var storageURL = MeetingStore.defaultRoot
@@ -55,14 +57,17 @@ final class AppState {
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var scopedURL: URL?
     @ObservationIgnored private var processingTask: Task<Void, Never>?
+    @ObservationIgnored private var sideNoteWrites: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var sideNoteRevisions: [UUID: UUID] = [:]
     var canCancelProcessing: Bool { processingTask != nil && busy && !capture.isRecording }
     var selected: Meeting? { meetings.first { $0.id == selectedID } }
     var current: Meeting? { meetings.first { $0.id == currentID } }
     var filteredMeetings: [Meeting] { searchIDs.map { ids in meetings.filter { ids.contains($0.id) } } ?? meetings }
     var canRecord: Bool { !busy && !capture.isRecording && !capture.isPreparing && store != nil }
-    var preventsUpdateRestart: Bool { busy || capture.isRecording || capture.isPreparing }
-    init() {
-        isDemo = ProcessInfo.processInfo.arguments.contains("--demo")
+    var hasActiveMeetingWork: Bool { busy || capture.isRecording || capture.isPreparing }
+    var preventsUpdateRestart: Bool { hasActiveMeetingWork || !sideNotesSaving.isEmpty || !sideNotesSaveErrors.isEmpty }
+    init(preview: Bool = ProcessInfo.processInfo.arguments.contains("--demo")) {
+        isDemo = preview
         if isDemo { seedDemo() }
         else { autoOverrides = UserDefaults.standard.dictionary(forKey: "hush.autoOverrides") as? [String: Bool] ?? [:] }
     }
@@ -179,6 +184,7 @@ final class AppState {
             do {
                 guard let snapshot = meetings.first(where: { $0.id == id }) else { throw HushError.message("This meeting couldn't be found.") }
                 var transcript = try await capture.stop()
+                guard await flushSideNotes() else { throw HushError.message("Save your side notes before updating the AI notes.") }
                 update(id) { $0.audioOffsets = capture.audioOffsets }
                 if preferences.providers.transcription != .apple {
                     var aligned = snapshot; aligned.audioOffsets = capture.audioOffsets
@@ -193,6 +199,34 @@ final class AppState {
     func cancelProcessing() {
         guard canCancelProcessing else { return }
         processingTask?.cancel()
+    }
+    func setSideNotes(_ id: UUID, text: String? = nil, includeInContext: Bool? = nil) {
+        guard !busy, let old = meetings.first(where: { $0.id == id }) else { return }
+        update(id) {
+            if $0.notesContextDigest == nil, $0.structuredNotes != nil { $0.notesContextDigest = $0.contextDigest }
+            if let text { $0.userNotes = text }
+            if let includeInContext { $0.useSideNotesAsContext = includeInContext }
+        }
+        guard let meeting = meetings.first(where: { $0.id == id }) else { return }
+        if currentID == id { liveNotes = meeting.userNotes }
+        guard !isDemo, let store else { return }
+        if old.userNotes == meeting.userNotes && old.includesSideNotes == meeting.includesSideNotes && sideNotesSaveErrors[id] == nil { return }
+        let previous = sideNoteWrites[id], revision = UUID()
+        sideNoteRevisions[id] = revision; sideNotesSaving.insert(id); sideNotesSaveErrors[id] = nil
+        sideNoteWrites[id] = Task {
+            await previous?.value
+            do {
+                try await store.saveSideNotes(id, text: meeting.userNotes, includeInContext: meeting.includesSideNotes)
+                if sideNoteRevisions[id] == revision { sideNotesSaveErrors[id] = nil }
+            } catch {
+                if sideNoteRevisions[id] == revision { sideNotesSaveErrors[id] = "Side notes couldn't be saved. Check available disk space, then try again." }
+            }
+            if sideNoteRevisions[id] == revision { sideNoteWrites[id] = nil; sideNotesSaving.remove(id) }
+        }
+    }
+    @discardableResult func flushSideNotes() async -> Bool {
+        while !sideNoteWrites.isEmpty { for task in Array(sideNoteWrites.values) { await task.value } }
+        return sideNotesSaveErrors.isEmpty
     }
     private func transcribeFiles(id: UUID, meeting: Meeting) async throws -> Transcript {
         guard let store else { throw HushError.message("The meeting store isn't ready.") }
@@ -247,6 +281,7 @@ final class AppState {
         processingTask = Task {
             defer { busy = false; processingTask = nil }
             do {
+                guard await flushSideNotes() else { throw HushError.message("Save your side notes before updating the AI notes.") }
                 guard let meeting = meetings.first(where: { $0.id == id }) else { return }
                 if !meeting.transcriptionFinal {
                     update(id) { $0.state = .transcribing }
@@ -271,16 +306,18 @@ final class AppState {
         try await store.save(meeting)
         templates = try Templates.load()
         guard let template = templates.first(where: { $0.id == meeting.templateID }) ?? templates.first else { throw HushError.message("No note template is available.") }
-        let provider: any NotesGenerator = preferences.providers.notes == .apple ? AppleNotesProvider() : CloudNotesProvider(configuration: preferences.providers)
-        let context = MeetingContext(title: meeting.title, start: meeting.startedAt, userNotes: meeting.userNotes)
+        let provider = NotesProviders.make(preferences.providers)
+        let context = meeting.summaryContext
+        let limit: Duration = preferences.providers.notes.isLocalServer ? .seconds(300) : .seconds(120)
         DiagnosticLog.shared.record(.notesStarted)
-        let result = try await AsyncDeadline.run(for: .seconds(120)) {
+        let result = try await AsyncDeadline.run(for: limit) {
             try await provider.preflight()
             return try await MeetingSummarizer(generator: TemplateNotesProvider(base: provider, instruction: template.instruction), enforceMergeBudget: true).summarize(transcript, context: context)
         }
         try Task.checkCancellation()
         DiagnosticLog.shared.record(.notesFinished)
         meeting.structuredNotes = result.notes; meeting.title = result.notes.title
+        meeting.notesContextDigest = meeting.contextDigest
         meeting.state = .ready; meeting.failure = nil
         let text = template.render(result.notes)
         try await store.save(meeting, markdown: text)
@@ -316,6 +353,7 @@ final class AppState {
             do {
                 if !isDemo { try await store?.delete(id) }
                 meetings.removeAll { $0.id == id }
+                sideNotesSaveErrors[id] = nil
                 selectedID = nil; markdown = ""; displayedTranscript = nil
                 if let next = meetings.first { select(next.id) }
                 storageSize = await store?.size() ?? 0
@@ -331,6 +369,7 @@ final class AppState {
             do {
                 if !isDemo { try await store?.deleteAll() }
                 meetings = []; selectedID = nil; markdown = ""; displayedTranscript = nil; storageSize = 0
+                sideNotesSaveErrors = [:]
             } catch { notice = error.localizedDescription }
         }
     }
@@ -338,7 +377,10 @@ final class AppState {
         guard !busy && !capture.isRecording else { return }
         busy = true
         Task {
-            do { try await store?.setEncryption(enabled); preferences.encrypted = enabled }
+            do {
+                guard await flushSideNotes() else { throw HushError.message("Save your side notes before changing encryption.") }
+                try await store?.setEncryption(enabled); preferences.encrypted = enabled
+            }
             catch { notice = error.localizedDescription }
             busy = false
         }
@@ -352,6 +394,7 @@ final class AppState {
         busy = true
         Task {
             do {
+                guard await flushSideNotes() else { throw HushError.message("Save your side notes before moving storage.") }
                 guard !url.resolvingSymlinksInPath().path.hasPrefix(storageURL.resolvingSymlinksInPath().path + "/") else {
                     throw HushError.message("Choose a folder outside the current meeting store.")
                 }

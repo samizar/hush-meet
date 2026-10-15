@@ -6,8 +6,8 @@
     <key>CFBundleIdentifier</key><string>app.hush.mac</string>
     <key>CFBundleExecutable</key><string>Hush</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.1.1</string>
-    <key>CFBundleVersion</key><string>6</string>
+    <key>CFBundleShortVersionString</key><string>1.2.0</string>
+    <key>CFBundleVersion</key><string>8</string>
     <key>SUFeedURL</key><string>https://github.com/samizar/hush-meet/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key><string>VEVQgxc5xFL9HQPGwxiXEx6B9BJxjmO6Bjp1aWrH/YI=</string>
     <key>SUEnableAutomaticChecks</key><true/>
@@ -22,6 +22,7 @@
     <key>LSUIElement</key><true/>
     <key>LSArchitecturePriority</key><array><string>arm64</string></array>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
     <key>NSMicrophoneUsageDescription</key><string>Hush records your side of a meeting to make private notes on this Mac.</string>
     <key>NSAudioCaptureUsageDescription</key><string>Hush records the other side of your call on a separate audio track.</string>
     <key>NSSpeechRecognitionUsageDescription</key><string>Hush transcribes your meetings on this Mac using Apple's speech model.</string>

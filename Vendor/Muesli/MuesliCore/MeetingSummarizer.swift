@@ -63,8 +63,11 @@ public struct MeetingSummarizer: Sendable {
         }
         guard !lines.isEmpty else { throw SummarizeError.emptyTranscript }
 
-        let budget = await generator.transcriptCharacterBudget
-        guard budget >= Self.minimumBudget else { throw SummarizeError.contextTooSmall(characters: budget) }
+        let modelBudget = await generator.transcriptCharacterBudget
+        guard modelBudget >= Self.minimumBudget else { throw SummarizeError.contextTooSmall(characters: modelBudget) }
+        let contextSize = Prompts.notesBlock(context)?.count ?? 0
+        guard contextSize <= modelBudget / 2 else { throw SummarizeError.sideNotesTooLong }
+        let budget = modelBudget - contextSize
         var usage = TokenUsage()
         var requests = 0
 
@@ -138,8 +141,7 @@ public struct MeetingSummarizer: Sendable {
             let final = chunks.count == 1
             var next: [GeneratedNotes] = []
             for chunk in chunks {
-                let partContext = MeetingContext(title: context.title, start: context.start, timeZone: context.timeZone,
-                                                 userNotes: final ? context.userNotes : nil)
+                let partContext = MeetingContext(title: context.title, start: context.start, timeZone: context.timeZone, userNotes: context.userNotes)
                 let prompt = "Merge these extracted meeting facts. Remove duplicates, retain owners and exact deadlines. Keep the result concise.\n" +
                     Prompts.single(transcript: "<partial_notes>\n" + chunk + "\n</partial_notes>", context: partContext)
                 next.append(try await run(prompt))

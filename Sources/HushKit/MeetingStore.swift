@@ -55,6 +55,15 @@ public actor MeetingStore {
     public func transcript(_ id: UUID) throws -> Transcript {
         try Transcript.load(jsonData: read(folder(id).appendingPathComponent("transcript.json")))
     }
+    /// Patch only annotations so an autosave cannot overwrite newer processing state or generated notes.
+    public func saveSideNotes(_ id: UUID, text: String, includeInContext: Bool) throws {
+        let url = folder(id).appendingPathComponent("meeting.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        var meeting = try decoder.decode(Meeting.self, from: read(url))
+        if meeting.notesContextDigest == nil, meeting.structuredNotes != nil { meeting.notesContextDigest = meeting.contextDigest }
+        meeting.userNotes = text; meeting.useSideNotesAsContext = includeInContext
+        try save(meeting)
+    }
     public func markdown(_ id: UUID) throws -> String {
         String(decoding: try read(folder(id).appendingPathComponent("notes.md")), as: UTF8.self)
     }

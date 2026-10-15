@@ -40,7 +40,9 @@ struct PopoverView: View {
                 Spacer(); Text(Transcript.timestamp(state.elapsed)).font(DesignTokens.mono).foregroundStyle(DesignTokens.soft)
             }
             LiveLine(capture: state.capture)
-            TextField("A thought to keep…", text: $state.liveNotes, axis: .vertical).textFieldStyle(.plain)
+            TextField("A thought to keep…", text: Binding(get: { state.current?.userNotes ?? state.liveNotes }, set: { text in
+                if let id = state.currentID { state.setSideNotes(id, text: text) }
+            }), axis: .vertical).textFieldStyle(.plain)
                 .font(DesignTokens.body).lineLimit(3...6).accessibilityLabel("Meeting notes")
             LiveTranscript(capture: state.capture).lineLimit(3)
             if let warning = state.capture.warning { Text(warning).font(DesignTokens.small).foregroundStyle(DesignTokens.soft) }

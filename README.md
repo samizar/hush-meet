@@ -34,6 +34,8 @@ Add `--reduce-motion` to preview the static voice indicators and crossfades with
 
 Click the outlined circle in the menu bar, choose the spoken language, and click **Record a meeting**. The microphone is **Me**; selected call applications are **Them**. Both tracks remain separate. Use headphones, and obtain any consent needed for your conversation.
 
+Write an agenda, names, questions or rough thoughts in **Side notes**, before or after a summary or while recording. The notebook opens a side panel in wide windows and an inline editor in smaller windows; its toolbar can hide it. Edits autosave to the meeting and are searchable. The popover edits the same notes. **Use as AI context** controls whether they accompany the transcript. Original side notes are preserved separately from generated notes. After changing included context, choose **Update AI notes**; existing AI output remains until regeneration succeeds. Hush finishes pending saves before quitting.
+
 While recording, type your own outline in the popover or notebook. Stop from either surface. Apple Speech streams locally; cloud speech services transcribe the saved tracks after Stop. The selected notes provider then writes structured notes. If a model is unavailable, the transcript remains available and the app offers a retry. Cloud providers are never selected automatically.
 
 Double-click a meeting title to rename it. Search covers titles, notes, handwritten outlines and transcripts. Choose a template to regenerate notes from the saved transcript. The export menu copies Markdown or transcripts, saves Markdown or a paginated PDF, and reveals the meeting folder.
@@ -42,10 +44,20 @@ Double-click a meeting title to rename it. Search covers titles, notes, handwrit
 
 - **General:** launch at login, temporary audio retention, consent line, storage location and editable templates.
 - **Meetings:** calendar, optional automatic recording, ad-hoc call prompts, and application capture selection. Individual upcoming meetings can override automatic recording. Unscheduled calls always ask. Browser capture includes every audio-producing tab of that browser.
-- **Models:** Apple Speech; Deepgram, ElevenLabs Scribe, Gemini or OpenAI transcription. Apple Foundation Models; Anthropic, OpenAI, Gemini or an OpenAI-compatible notes endpoint. Enter keys in the secure fields and save them to the Keychain. Test sends synthetic content, may incur provider charges, and never uses a saved meeting.
+- **Models:** Apple Speech; Deepgram, ElevenLabs Scribe, Gemini or OpenAI transcription. Apple Foundation Models; Ollama or LM Studio / llama.cpp local models; Anthropic, OpenAI, Gemini or a remote OpenAI-compatible notes endpoint. Enter keys in the secure fields and save them to the Keychain. Test sends synthetic content, may incur provider charges, and never uses a saved meeting.
 - **Privacy:** storage usage, optional AES-GCM encryption, reveal files and confirmed deletion.
 
-Use a provider model available to your account. Notes model names are editable. OpenAI-compatible servers must expose a valid HTTPS endpoint and support JSON-schema responses. Configure TLS in front of a default HTTP-only Ollama or LM Studio installation; Hush does not disable certificate validation.
+Use a provider model available to your account. Notes model names are editable. Remote OpenAI-compatible servers must expose a valid HTTPS endpoint and support JSON-schema responses. Certificate validation stays enabled.
+
+### Local AI models
+
+Choose **Settings → Models → Notes → Ollama (local)** or **LM Studio / llama.cpp (local)**. Open your local runner, download/load a chat or instruction model, then click **Find models** and select it. **Test local notes** sends only a short synthetic example. Hush does not download large models or install runners automatically. Small models can omit details; review the output and choose a more capable model if needed.
+
+- Ollama defaults to `http://127.0.0.1:11434`. It uses the native model listing, routing checks and JSON-schema chat API. Downloaded Llama, Gemma, Qwen and other chat models can be selected. Cloud-backed and embedding-only Ollama models are refused before any meeting text is sent.
+- LM Studio defaults to `http://127.0.0.1:1234/v1`. A llama.cpp server can use `http://127.0.0.1:8080/v1`. Both use model discovery and OpenAI-compatible structured output. If your local server requires a token, store it in the optional Keychain field.
+- Local providers accept only literal `127.0.0.1`, `[::1]`, or `localhost` (canonicalized to `127.0.0.1`), pinned to the exact selected scheme/host/port. Other addresses belong under the remote HTTPS provider. Redirects are refused. Your local server controls the selected model; no cloud fallback is attempted.
+
+API references: [Ollama chat](https://docs.ollama.com/api/chat), [Ollama model metadata](https://github.com/ollama/ollama/blob/main/api/types.go), [LM Studio structured output](https://lmstudio.ai/docs/developer/openai-compat/structured-output).
 
 ## Files and privacy
 
@@ -57,7 +69,7 @@ Templates are installed into `Hush/Templates` in Application Support. Each is a 
 
 Search uses system SQLite FTS5 entirely in memory, rebuilt from meeting folders. There is no plaintext database journal, telemetry, account, backend or crash SDK. Default meeting providers make no application HTTP requests. Apple manages its own speech/model asset downloads. Automatic update checks contact GitHub and its download CDN with ordinary version/user-agent information; meeting content and provider keys are never included. System profiling is disabled. General settings can disable background checks.
 
-All first-party meeting/provider HTTP goes through `NetworkClient`, with exact configured host matching, HTTPS, no redirects, no persisted cookies, credentials or response cache. API keys are sent in headers. The app confirms cloud use before a recording or a retry. Automatic cloud recordings ask for confirmation instead of silently starting. Sparkle's separate update transport uses HTTPS, an Ed25519-signed feed, and signed update archives verified before extraction. Developer ID signing and Apple notarization protect the app and installer as well. Preview mode never starts the updater.
+All first-party meeting/provider HTTP goes through `NetworkClient`, with exact configured host matching, HTTPS for remote providers, narrowly scoped loopback HTTP for explicitly chosen local providers, no redirects, no persisted cookies, credentials or response cache. API keys are sent in headers. The app confirms cloud use before a recording or a retry. Automatic cloud recordings ask for confirmation instead of silently starting. Sparkle's separate update transport uses HTTPS, an Ed25519-signed feed, and signed update archives verified before extraction. Developer ID signing and Apple notarization protect the app and installer as well. Preview mode never starts the updater.
 
 ## Verification
 
@@ -66,7 +78,7 @@ All first-party meeting/provider HTTP goes through `NetworkClient`, with exact c
 HUSH_RUN_MODEL_TESTS=1 ./scripts/test.sh
 ```
 
-The first command runs the inherited Muesli tests, Hush storage/encryption/search/calendar/provider-boundary tests, PDF pagination tests, and a source-level network audit. The second additionally exercises the real Apple notes model with synthetic meeting speech; it requires Apple Intelligence to be ready.
+The first command runs the inherited Muesli tests, Hush storage/encryption/search/calendar/provider-boundary tests, PDF pagination tests, and a source-level network audit. The second additionally exercises the real Apple notes model with synthetic meeting speech; it requires Apple Intelligence to be ready. `HUSH_RUN_LOCAL_MODEL_TESTS=1 ./scripts/test.sh` runs a real local Ollama summarization with synthetic context, using `llama3.2:latest` by default or `HUSH_LOCAL_MODEL` if set. These tests do not download models.
 
 See [VERIFICATION.md](VERIFICATION.md) for the actual validation performed and remaining hardware/account checks. No automated test records a user's microphone or call, uploads a real meeting, or writes a real calendar event.
 

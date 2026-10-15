@@ -162,12 +162,14 @@ public enum SummarizeError: Error, LocalizedError, Equatable {
     case emptyTranscript
     case unparseableOutput(String)
     case contextTooSmall(characters: Int)
+    case sideNotesTooLong
 
     public var errorDescription: String? {
         switch self {
         case .emptyTranscript: "The transcript is empty, so there's nothing to summarize."
         case .unparseableOutput(let head): "The model didn't return valid notes JSON. Output began: “\(head)”"
         case .contextTooSmall(let n): "This model's context window only fits \(n) characters of transcript per request, which is too small to summarize a meeting."
+        case .sideNotesTooLong: "The side notes are too long for this model's context window. Shorten them, turn off Use as AI context, or choose a model with a larger context budget. Your original notes are saved."
         }
     }
 }

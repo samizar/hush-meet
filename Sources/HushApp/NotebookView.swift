@@ -136,12 +136,18 @@ struct MeetingPage: View {
     let meeting: Meeting
     @State private var editingTitle = false
     @State private var draftTitle = ""
+    @State private var sideNotesVisible = true
     var body: some View {
         VStack(spacing: .zero) {
             HStack {
                 Text("NOTEBOOK").font(DesignTokens.small).tracking(DesignTokens.divider).foregroundStyle(DesignTokens.soft)
                 Spacer()
                 if state.isDemo { Text("PREVIEW").font(DesignTokens.small).foregroundStyle(DesignTokens.soft) }
+                Button { sideNotesVisible.toggle() } label: {
+                    Label("Side notes", systemImage: "sidebar.right").font(DesignTokens.chrome)
+                }.buttonStyle(.plain).foregroundStyle(DesignTokens.soft)
+                    .help(sideNotesVisible ? "Hide side notes" : "Show side notes")
+                    .accessibilityLabel(sideNotesVisible ? "Hide side notes" : "Show side notes")
                 Menu {
                     Button("Copy as Markdown") { state.copy(state.markdown) }.disabled(state.markdown.isEmpty)
                     Button("Save Markdown…") { Exporter.markdown(state.markdown, title: meeting.title) }.disabled(state.markdown.isEmpty)
@@ -154,62 +160,78 @@ struct MeetingPage: View {
                 } label: { Label("Export", systemImage: "square.and.arrow.up").font(DesignTokens.chrome) }
                 .menuStyle(.borderlessButton).fixedSize().foregroundStyle(DesignTokens.soft)
             }.padding(.horizontal, DesignTokens.margin).padding(.top, DesignTokens.inset).padding(.bottom, DesignTokens.gap)
-            ScrollView {
-                VStack(alignment: .leading, spacing: DesignTokens.indent) {
-                    VStack(alignment: .leading, spacing: DesignTokens.gap) {
-                        if editingTitle {
-                            TextField("Meeting title", text: $draftTitle).font(DesignTokens.title).textFieldStyle(.plain)
-                                .onSubmit { state.rename(meeting.id, title: draftTitle); editingTitle = false }
-                        } else {
-                            Text(meeting.title).font(DesignTokens.title).textSelection(.enabled)
-                                .onTapGesture(count: 2) { draftTitle = meeting.title; editingTitle = true }.help("Double-click to rename")
-                        }
-                        HStack(spacing: DesignTokens.space) {
-                            Text(meeting.startedAt, format: .dateTime.month(.wide).day().year())
-                            Text("/")
-                            Text(meeting.startedAt, format: .dateTime.hour().minute())
-                            Text("/")
-                            Text(Transcript.timestamp(meeting.duration))
-                        }.font(DesignTokens.mono).foregroundStyle(DesignTokens.soft)
-                        HStack(spacing: DesignTokens.space) {
-                            Menu {
-                                ForEach(state.templates) { template in
-                                    Button(template.name) { state.changeTemplate(template.id, for: meeting.id) }
-                                }
-                                Divider()
-                                Button("Edit templates…") { NSWorkspace.shared.open(Templates.directory) }
-                            } label: {
-                                HStack(spacing: DesignTokens.smallGap) {
-                                    Text(state.templates.first(where: { $0.id == meeting.templateID })?.name ?? "Quick")
-                                    Image(systemName: "chevron.down").font(DesignTokens.small)
-                                }.font(DesignTokens.chrome).foregroundStyle(DesignTokens.soft)
-                            }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().disabled(state.busy || state.capture.isRecording)
-                            Spacer()
-                            if let source = meeting.structuredNotes?.generatedBy {
-                                Text(source.hasPrefix("Apple") ? "On this Mac" : source.components(separatedBy: ":").first ?? source)
-                                    .font(DesignTokens.small).foregroundStyle(DesignTokens.faint)
-                            }
-                        }.padding(.top, DesignTokens.smallGap)
+            GeometryReader { geometry in
+                HStack(spacing: .zero) {
+                    pageContent(inlineSideNotes: sideNotesVisible && geometry.size.width < 800)
+                    if sideNotesVisible && geometry.size.width >= 800 {
+                        Rectangle().fill(DesignTokens.hairline).frame(width: DesignTokens.divider)
+                        ScrollView { SideNotesEditor(state: state, meeting: meeting).id(meeting.id).padding(DesignTokens.inset) }
+                            .frame(width: DesignTokens.sideNotesWidth).background(DesignTokens.sidebar.opacity(0.55))
                     }
-                    Rectangle().fill(DesignTokens.hairline).frame(height: DesignTokens.divider)
-                    if meeting.id == state.currentID && state.capture.isRecording { recordingBody }
-                    else if meeting.state == .writing || meeting.state == .transcribing { processingBody }
-                    else if meeting.state == .failed { failureBody }
-                    else { MarkdownPage(markdown: state.markdown, omitTitle: true).id(meeting.id.uuidString + meeting.templateID + state.markdown) }
-                    if !state.markdown.isEmpty || state.displayedTranscript != nil { transcriptBody }
-                    if let notice = state.notice, meeting.state != .failed {
-                        HStack(alignment: .top) {
-                            Text(notice).font(DesignTokens.chrome).foregroundStyle(DesignTokens.soft)
-                            Spacer()
-                            Button { state.notice = nil } label: { Image(systemName: "xmark").font(DesignTokens.small) }.buttonStyle(.plain)
-                        }.padding(.top, DesignTokens.space)
-                    }
-                    Spacer(minLength: DesignTokens.margin)
-                }.frame(maxWidth: DesignTokens.pageWidth, alignment: .leading)
-                    .padding(.horizontal, DesignTokens.margin).padding(.top, DesignTokens.margin)
-                    .frame(maxWidth: .infinity)
+                }
             }
         }.background(DesignTokens.paper)
+    }
+    private func pageContent(inlineSideNotes: Bool) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: DesignTokens.indent) {
+                VStack(alignment: .leading, spacing: DesignTokens.gap) {
+                    if editingTitle {
+                        TextField("Meeting title", text: $draftTitle).font(DesignTokens.title).textFieldStyle(.plain)
+                            .onSubmit { state.rename(meeting.id, title: draftTitle); editingTitle = false }
+                    } else {
+                        Text(meeting.title).font(DesignTokens.title).textSelection(.enabled)
+                            .onTapGesture(count: 2) { draftTitle = meeting.title; editingTitle = true }.help("Double-click to rename")
+                    }
+                    HStack(spacing: DesignTokens.space) {
+                        Text(meeting.startedAt, format: .dateTime.month(.wide).day().year())
+                        Text("/")
+                        Text(meeting.startedAt, format: .dateTime.hour().minute())
+                        Text("/")
+                        Text(Transcript.timestamp(meeting.duration))
+                    }.font(DesignTokens.mono).foregroundStyle(DesignTokens.soft)
+                    HStack(spacing: DesignTokens.space) {
+                        Menu {
+                            ForEach(state.templates) { template in
+                                Button(template.name) { state.changeTemplate(template.id, for: meeting.id) }
+                            }
+                            Divider()
+                            Button("Edit templates…") { NSWorkspace.shared.open(Templates.directory) }
+                        } label: {
+                            HStack(spacing: DesignTokens.smallGap) {
+                                Text(state.templates.first(where: { $0.id == meeting.templateID })?.name ?? "Quick")
+                                Image(systemName: "chevron.down").font(DesignTokens.small)
+                            }.font(DesignTokens.chrome).foregroundStyle(DesignTokens.soft)
+                        }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().disabled(state.busy || state.capture.isRecording)
+                        Spacer()
+                        if let source = meeting.structuredNotes?.generatedBy {
+                            Text(source.hasPrefix("Apple") ? "On this Mac" : source.components(separatedBy: ":").first ?? source)
+                                .font(DesignTokens.small).foregroundStyle(DesignTokens.faint)
+                        }
+                    }.padding(.top, DesignTokens.smallGap)
+                }
+                Rectangle().fill(DesignTokens.hairline).frame(height: DesignTokens.divider)
+                if inlineSideNotes {
+                    SideNotesEditor(state: state, meeting: meeting).id(meeting.id)
+                    Rectangle().fill(DesignTokens.hairline).frame(height: DesignTokens.divider)
+                }
+                if meeting.id == state.currentID && state.capture.isRecording { recordingBody }
+                else if meeting.state == .writing || meeting.state == .transcribing { processingBody }
+                else if meeting.state == .failed { failureBody }
+                else { MarkdownPage(markdown: state.markdown, omitTitle: true).id(meeting.id.uuidString + meeting.templateID + state.markdown) }
+                if !state.markdown.isEmpty || state.displayedTranscript != nil { transcriptBody }
+                if let notice = state.notice, meeting.state != .failed {
+                    HStack(alignment: .top) {
+                        Text(notice).font(DesignTokens.chrome).foregroundStyle(DesignTokens.soft)
+                        Spacer()
+                        Button { state.notice = nil } label: { Image(systemName: "xmark").font(DesignTokens.small) }.buttonStyle(.plain)
+                    }.padding(.top, DesignTokens.space)
+                }
+                Spacer(minLength: DesignTokens.margin)
+            }.frame(maxWidth: DesignTokens.pageWidth, alignment: .leading)
+                .padding(.horizontal, DesignTokens.margin).padding(.top, DesignTokens.margin)
+                .frame(maxWidth: .infinity)
+        }
     }
     private var recordingBody: some View {
         VStack(alignment: .leading, spacing: DesignTokens.inset) {
@@ -219,10 +241,6 @@ struct MeetingPage: View {
                 Spacer(); Text(Transcript.timestamp(state.elapsed)).font(DesignTokens.mono).foregroundStyle(DesignTokens.soft)
             }
             LiveLine(capture: state.capture)
-            TextEditor(text: $state.liveNotes).font(DesignTokens.body).scrollContentBackground(.hidden)
-                .frame(minHeight: DesignTokens.liveHeight * 2).overlay(alignment: .topLeading) {
-                    if state.liveNotes.isEmpty { Text("A thought to keep, a question to ask…").font(DesignTokens.body).foregroundStyle(DesignTokens.faint).padding(DesignTokens.smallGap).allowsHitTesting(false) }
-                }.accessibilityLabel("Your notes during the meeting")
             LiveTranscript(capture: state.capture)
             if let warning = state.capture.warning { Text(warning).font(DesignTokens.chrome).foregroundStyle(DesignTokens.soft) }
             Text(state.preferences.providers.dataFlow).font(DesignTokens.small).foregroundStyle(DesignTokens.soft)

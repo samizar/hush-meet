@@ -29,8 +29,9 @@ enum DesignTokens {
     static let divider: CGFloat = 1
     static let pageWidth: CGFloat = 640
     static let sidebarWidth: CGFloat = 260
+    static let sideNotesWidth: CGFloat = 280
     static let popoverWidth: CGFloat = 320
-    static let windowWidth: CGFloat = 1060
+    static let windowWidth: CGFloat = 1180
     static let windowHeight: CGFloat = 740
     static let minWindowWidth: CGFloat = 800
     static let minWindowHeight: CGFloat = 520

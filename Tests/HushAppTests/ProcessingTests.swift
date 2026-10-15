@@ -6,6 +6,25 @@ import MuesliCore
 
 @Suite("Processing recovery") @MainActor
 struct ProcessingTests {
+    @Test func rapidSideNotesEditsSaveLatestTextAcrossSelections() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let state = AppState(preview: false)
+        let store = try MeetingStore(root: root)
+        var first = Meeting(title: "First"); first.state = .ready
+        var second = Meeting(title: "Second"); second.state = .ready
+        try await store.save(first); try await store.save(second)
+        state.store = store; state.meetings = [first, second]; state.selectedID = first.id
+        for i in 0..<20 { state.setSideNotes(first.id, text: "Agenda version \(i)") }
+        state.selectedID = second.id
+        state.setSideNotes(second.id, text: "Separate context", includeInContext: false)
+        #expect(await state.flushSideNotes())
+        let saved = try await store.list()
+        #expect(saved.first { $0.id == first.id }?.userNotes == "Agenda version 19")
+        #expect(saved.first { $0.id == second.id }?.userNotes == "Separate context")
+        #expect(saved.first { $0.id == second.id }?.includesSideNotes == false)
+        #expect(state.sideNotesSaving.isEmpty && state.sideNotesSaveErrors.isEmpty)
+    }
     @Test func failedRetryRestoresControlsAndAllowsUpdates() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

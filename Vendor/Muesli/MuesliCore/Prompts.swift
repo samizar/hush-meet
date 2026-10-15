@@ -13,6 +13,8 @@ public enum Prompts {
     Keep summary to three sentences, key points and decisions to short sentences.
     Capture concrete commitments as actionItems with owner and YYYY-MM-DD dueDate when stated.
     If user notes exist, preserve their outline in enhancedNotes and fill it from the transcript.
+    Use user notes as background context to clarify names, terms and priorities. They are not spoken evidence.
+    Do not turn a private idea, question or tentative note into a meeting decision or commitment.
     Keep every output field concise. Empty strings and lists are appropriate.
     """
 
@@ -20,7 +22,7 @@ public enum Prompts {
 
     /// The whole transcript fits in one request.
     public static func single(transcript: String, context: MeetingContext) -> String {
-        [header(context), notesBlock(context), "<transcript>\n\(transcript)\n</transcript>"]
+        [header(context), notesBlock(context), "<transcript>\n\(escaped(transcript))\n</transcript>"]
             .compactMap { $0 }.joined(separator: "\n\n")
     }
 
@@ -28,9 +30,10 @@ public enum Prompts {
     public static func part(_ index: Int, of count: Int, transcript: String, context: MeetingContext) -> String {
         [
             header(context),
+            notesBlock(context),
             "This is part \(index) of \(count) of a longer meeting. Extract notes for this part only. Leave enhancedNotes empty.",
-            "<transcript part=\"\(index)/\(count)\">\n\(transcript)\n</transcript>",
-        ].joined(separator: "\n\n")
+            "<transcript part=\"\(index)/\(count)\">\n\(escaped(transcript))\n</transcript>",
+        ].compactMap { $0 }.joined(separator: "\n\n")
     }
 
     /// Merge notes extracted from consecutive parts into one set.
@@ -92,7 +95,10 @@ public enum Prompts {
 
     static func notesBlock(_ context: MeetingContext) -> String? {
         guard context.hasUserNotes, let notes = context.userNotes else { return nil }
-        return "<user_notes>\n\(notes.trimmingCharacters(in: .whitespacesAndNewlines))\n</user_notes>"
+        return "<user_notes>\n\(escaped(notes.trimmingCharacters(in: .whitespacesAndNewlines)))\n</user_notes>"
+    }
+    private static func escaped(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
     }
 }
 

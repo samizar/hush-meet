@@ -4,6 +4,14 @@ import MuesliCore
 
 public protocol NotesProvider: NotesGenerator {}
 
+public enum NotesProviders {
+    public static func make(_ configuration: ProviderConfiguration) -> any NotesGenerator {
+        if configuration.notes == .apple { return AppleNotesProvider() }
+        if configuration.notes.isLocalServer { return LocalNotesProvider(configuration: configuration) }
+        return CloudNotesProvider(configuration: configuration)
+    }
+}
+
 public struct AppleNotesProvider: NotesProvider {
     public init() {}
     public var displayName: String { "Apple on-device" }
@@ -50,7 +58,7 @@ public struct CloudNotesProvider: NotesProvider {
     public var displayName: String { configuration.notes.name + ":" + configuration.resolvedModel }
     public var transcriptCharacterBudget: Int { get async { configuration.notes == .compatible ? 10_000 : 30_000 } }
     public func preflight() async throws {
-        guard configuration.notes != .apple, !configuration.resolvedModel.isEmpty else { throw HushError.message("Enter a notes model in Settings → Models.") }
+        guard configuration.notes != .apple, !configuration.notes.isLocalServer, !configuration.resolvedModel.isEmpty else { throw HushError.message("Enter a notes model in Settings → Models.") }
         if configuration.notes != .compatible { _ = try requiredKey() }
         if configuration.notes == .compatible {
             guard let url = URL(string: configuration.compatibleURL) else { throw HushError.message("Enter a valid HTTPS server address.") }
@@ -67,7 +75,7 @@ public struct CloudNotesProvider: NotesProvider {
         let data: Data
         let text: String
         switch configuration.notes {
-        case .apple: throw HushError.message("Choose a cloud notes provider first.")
+        case .apple, .ollama, .lmstudio: throw HushError.message("Choose a cloud notes provider first.")
         case .anthropic:
             data = try await client.json(url: URL(string: "https://api.anthropic.com/v1/messages")!, body: [
                 "model": configuration.resolvedModel, "max_tokens": 3000, "system": system,

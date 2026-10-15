@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import MuesliCore
 
 public enum MeetingState: String, Codable, Sendable {
@@ -19,12 +20,22 @@ public struct Meeting: Identifiable, Codable, Sendable, Equatable {
     public var structuredNotes: MeetingNotes?
     public var transcriptionFinal: Bool
     public var audioOffsets: [String: TimeInterval]?
+    public var useSideNotesAsContext: Bool?
+    public var notesContextDigest: String?
     public init(id: UUID = UUID(), title: String = "Untitled meeting", startedAt: Date = .now,
                 locale: String = Locale.current.identifier, templateID: String = "quick") {
         self.id = id; self.title = title; self.startedAt = startedAt; self.locale = locale
         self.templateID = templateID; userNotes = ""; state = .recording; transcriptionFinal = false
     }
     public var duration: TimeInterval { max(0, (endedAt ?? .now).timeIntervalSince(startedAt)) }
+    public var includesSideNotes: Bool { useSideNotesAsContext ?? true }
+    public var contextDigest: String {
+        SHA256.hash(data: Data((includesSideNotes ? userNotes : "").utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+    public var sideNotesChanged: Bool { structuredNotes != nil && notesContextDigest.map { $0 != contextDigest } == true }
+    public var summaryContext: MeetingContext {
+        MeetingContext(title: title, start: startedAt, userNotes: includesSideNotes ? userNotes : nil)
+    }
 }
 
 public enum TranscriptionService: String, Codable, CaseIterable, Sendable, Identifiable {
@@ -51,11 +62,13 @@ public enum TranscriptionService: String, Codable, CaseIterable, Sendable, Ident
 }
 
 public enum NotesService: String, Codable, CaseIterable, Sendable, Identifiable {
-    case apple, anthropic, openai, gemini, compatible
+    case apple, ollama, lmstudio, anthropic, openai, gemini, compatible
     public var id: String { rawValue }
     public var name: String {
         switch self {
         case .apple: "Apple on-device"
+        case .ollama: "Ollama (local)"
+        case .lmstudio: "LM Studio / llama.cpp (local)"
         case .anthropic: "Anthropic"
         case .openai: "OpenAI"
         case .gemini: "Gemini"
@@ -64,13 +77,15 @@ public enum NotesService: String, Codable, CaseIterable, Sendable, Identifiable 
     }
     public var defaultModel: String {
         switch self {
-        case .apple: ""
+        case .apple, .ollama, .lmstudio: ""
         case .anthropic: "claude-sonnet-4-6"
         case .openai: "gpt-4.1-mini"
         case .gemini: "gemini-3.8-flash"
         case .compatible: ""
         }
     }
+    public var isLocalServer: Bool { self == .ollama || self == .lmstudio }
+    public var defaultLocalURL: String { self == .ollama ? "http://127.0.0.1:11434" : "http://127.0.0.1:1234/v1" }
 }
 
 public struct ProviderConfiguration: Codable, Sendable, Equatable {
@@ -78,11 +93,14 @@ public struct ProviderConfiguration: Codable, Sendable, Equatable {
     public var notes: NotesService = .apple
     public var model: String = ""
     public var compatibleURL: String = "https://localhost:11434/v1"
+    public var localURL: String?
     public init() {}
     public var resolvedModel: String { model.isEmpty ? notes.defaultModel : model }
+    public var resolvedLocalURL: String { localURL?.isEmpty == false ? localURL! : notes.defaultLocalURL }
     public var notesHost: String? {
         switch notes {
         case .apple: nil
+        case .ollama, .lmstudio: nil
         case .anthropic: "api.anthropic.com"
         case .openai: "api.openai.com"
         case .gemini: "generativelanguage.googleapis.com"
@@ -92,10 +110,10 @@ public struct ProviderConfiguration: Codable, Sendable, Equatable {
     public var allowedHosts: Set<String> { Set([transcription.host, notesHost].compactMap { $0 }) }
     public var dataFlow: String {
         let audio = transcription == .apple ? "Audio is transcribed on this Mac." : "Audio goes to \(transcription.name)."
-        let text = notes == .apple ? "Notes are written on this Mac." : "Transcript text goes to \(notes == .compatible ? (notesHost ?? "your configured server") : notes.name)."
+        let text = notes == .apple ? "Notes are written on this Mac." : notes.isLocalServer ? "Transcript and included side notes go to your local model server on this Mac." : "Transcript and included side notes go to \(notes == .compatible ? (notesHost ?? "your configured server") : notes.name)."
         return audio + " " + text
     }
-    public var leavesMac: Bool { transcription != .apple || notes != .apple }
+    public var leavesMac: Bool { transcription != .apple || (notes != .apple && !notes.isLocalServer) }
 }
 
 public struct Preferences: Codable, Sendable, Equatable {

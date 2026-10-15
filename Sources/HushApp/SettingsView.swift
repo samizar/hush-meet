@@ -63,7 +63,7 @@ struct HushSettingsView: View {
                     if let status = updater.status { Text(status).font(DesignTokens.small).foregroundStyle(DesignTokens.soft) }
                     Text("Update checks contact GitHub. Meeting content and API keys are never included.").font(DesignTokens.small).foregroundStyle(DesignTokens.soft)
                 } else { Text("Updates are disabled in preview mode.").foregroundStyle(DesignTokens.soft) }
-                Text("Hush \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1.1")")
+                Text("Hush \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.0")")
                     .font(DesignTokens.small).foregroundStyle(DesignTokens.soft)
             }
             settingsNotice
@@ -142,7 +142,9 @@ struct HushSettingsView: View {
             Section("Notes") {
                 Picker("Provider", selection: $state.preferences.providers.notes) {
                     ForEach(NotesService.allCases) { Text($0.name).tag($0) }
-                }.onChange(of: state.preferences.providers.notes) { state.preferences.providers.model = "" }
+                }.onChange(of: state.preferences.providers.notes) {
+                    state.preferences.providers.model = ""; state.preferences.providers.localURL = nil
+                }
                 if state.preferences.providers.notes == .apple {
                     Text(AppleNotesProvider.unavailableReason ?? "Ready. Notes are written entirely on this Mac.").foregroundStyle(DesignTokens.soft)
                     ModelTestButton(title: "Test on-device notes") {
@@ -154,11 +156,13 @@ struct HushSettingsView: View {
                             return "Test passed. Notes were generated on this Mac using a short example."
                         }
                     }
+                } else if state.preferences.providers.notes.isLocalServer {
+                    LocalModelSettings(configuration: $state.preferences.providers).id(state.preferences.providers.notes)
                 } else {
                     TextField("Model", text: $state.preferences.providers.model, prompt: Text(state.preferences.providers.notes.defaultModel))
                     if state.preferences.providers.notes == .compatible {
                         TextField("HTTPS base URL", text: $state.preferences.providers.compatibleURL)
-                        Text("Use an HTTPS endpoint for Ollama or LM Studio. Keys are optional for your own server.").font(DesignTokens.small).foregroundStyle(DesignTokens.soft)
+                        Text("For remote servers, use a valid HTTPS endpoint. For a server on this Mac, choose Ollama or LM Studio / llama.cpp above.").font(DesignTokens.small).foregroundStyle(DesignTokens.soft)
                     }
                     ProviderKeyRow(account: state.preferences.providers.notes.rawValue, name: state.preferences.providers.notes.name,
                                    optional: state.preferences.providers.notes == .compatible) {
@@ -184,7 +188,7 @@ struct HushSettingsView: View {
             }
             Section("A quiet promise") {
                 privacyLine("No account, server, analytics, or crash reporting.")
-                privacyLine("Default speech and notes models run on this Mac.")
+                privacyLine("Default speech and notes models run on this Mac. Optional local servers stay on literal loopback addresses.")
                 privacyLine("Apple may download its models once before first use.")
                 privacyLine("Automatic updates contact GitHub. Disable them in General settings.")
                 privacyLine("Cloud providers run only when you choose them. No silent fallback.")
@@ -210,6 +214,7 @@ struct HushSettingsView: View {
 
 struct ModelTestButton: View {
     let title: String
+    var limit: Duration = .seconds(60)
     var operation: () -> @Sendable () async throws -> String
     @State private var testing = false
     @State private var message: String?
@@ -223,10 +228,10 @@ struct ModelTestButton: View {
                     Task {
                         defer { testing = false }
                         do {
-                            message = try await AsyncDeadline.run(for: .seconds(60), operation: check)
+                            message = try await AsyncDeadline.run(for: limit, operation: check)
                             DiagnosticLog.shared.record(.modelCheckFinished)
                         } catch {
-                            message = error is AsyncDeadline.TimedOut ? "The model test took too long. Try again, or check that Apple's models have finished downloading." : error.localizedDescription
+                            message = error is AsyncDeadline.TimedOut ? "The model test took too long. Check that the selected model is ready, then try again." : error.localizedDescription
                             DiagnosticLog.shared.record(.modelCheckFailed, error: error)
                         }
                     }
