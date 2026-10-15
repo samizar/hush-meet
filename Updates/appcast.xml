@@ -1,8 +1,31 @@
-<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
+<?xml version="1.0" standalone="yes"?>
+<!-- sparkle-sign-warning:
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
---><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+-->
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>Hush</title>
+        <item>
+            <title>1.1.1</title>
+            <pubDate>Thu, 15 Oct 2026 14:51:54 +0300</pubDate>
+            <link>https://github.com/samizar/hush-meet/releases</link>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[Fixes a recording that could stay on “Finishing the transcript…” when the other side of a call produced no audio.
+
+- Empty audio channels now finish immediately; transcription shutdown has a deadline and properly cancels Apple Speech.
+- Processing can be cancelled safely. Saved recordings and transcripts remain available for retry, and controls recover after errors.
+- Model tests show progress and results directly in Settings. The on-device notes test now generates notes from a short example.
+- Adds private, local diagnostic logs under Settings → Privacy. Logs contain processing steps and error numbers, never meeting content, audio or API keys, and are never uploaded.
+
+Verified with 112 automated tests, including real on-device speech and notes using synthetic inputs. Apple Silicon; macOS 26 or later.
+
+If version 1.1.0 is already stuck, force quit Hush once, reopen it, then choose Check for Updates. After installing, select the unfinished meeting and click Retry transcription to recover its saved audio.
+]]></description>
+            <enclosure url="https://github.com/samizar/hush-meet/releases/download/v1.1.1/Hush.dmg" length="2222633" type="application/octet-stream" sparkle:edSignature="5vrxRhzZMZBYuMuz1rsOJvsYlfIpsEkfu9OY2jWqK5UQgIj09idPH7Y24mcWro3ul+1WFrMheQghMs/xBqYZDg=="/>
+        </item>
         <item>
             <title>1.1.0</title>
             <pubDate>Thu, 15 Oct 2026 14:06:12 +0300</pubDate>
@@ -29,10 +52,11 @@ The 100-test suite passes, including five tests covering update checks, meeting 
 
 Future releases must use the signed publishing workflow documented in the [README](https://github.com/samizar/hush-meet#package-and-release), so automatic-update clients always receive a valid feed and signed payload.
 ]]></description>
-            <enclosure url="https://github.com/samizar/hush-meet/releases/download/v1.1.0/Hush.dmg" length="2189543" type="application/octet-stream" sparkle:edSignature="cR0khhh3DRUEUu8NkOAi60J3W664HVmGJ64RxGVoBTxR8/MG4jeBw+wAmD9B+OBlMK3uSOwPBR734ObXEPXTBw=="></enclosure>
+            <enclosure url="https://github.com/samizar/hush-meet/releases/download/v1.1.0/Hush.dmg" length="2189543" type="application/octet-stream" sparkle:edSignature="cR0khhh3DRUEUu8NkOAi60J3W664HVmGJ64RxGVoBTxR8/MG4jeBw+wAmD9B+OBlMK3uSOwPBR734ObXEPXTBw=="/>
         </item>
     </channel>
-</rss><!-- sparkle-signatures:
-edSignature: rQrYZVIDOVWFk/w0bHPp1PcOxgCZkYNh14XwAYYcznJya29kf7GfvCY+KY7uLf5Xb5XMzLJmPxLvV10wGh4VDQ==
-length: 2793
+</rss>
+<!-- sparkle-signatures:
+edSignature: s5kzUfseNu4q+q5Jqb14itlqD0fwCySqp4EjhI63jDo0PCLrSgikJQVf48Ago7yw4zpAIJRHNNpl7DXUeVScDw==
+length: 4631
 -->

@@ -33,6 +33,9 @@
 - Both model buttons were clicked in an isolated app preview: Apple Speech reported readiness for English (Finland), and on-device notes generated a sample successfully with visible progress and an inline success result.
 - The Models tab explains why settings are temporarily unavailable during a meeting. Apple Speech readiness and actual on-device notes generation show local progress, bounded execution and inline results. Privacy settings expose local rotating diagnostics, limited to fixed events and numerical metadata. Tests verify content exclusion, private permissions and two-file rotation.
 
+- The final app (1.1.1, build 6) and approximately 2.2 MB DMG are signed for team `ZUT6837GB5`, have attached Apple tickets and pass Gatekeeper as `Notarized Developer ID`. The fresh public GitHub download passes SHA-256 and both Ed25519 feed/payload verification checks.
+- Sparkle's official CLI upgraded an isolated, notarized older Hush copy from the versioned GitHub feed to build 6. The installed copy passes deep signature, ticket and Gatekeeper checks. After promotion to stable, the exact `releases/latest/download/appcast.xml` URL embedded in Hush offers 1.1.1. The feed retains the previous 1.1.0 item. These checks did not launch or terminate the user's installed Hush or read its meeting content.
+
 ## Requires device/account acceptance testing
 
 - A real two-sided call with microphone and System Audio Recording permissions, including headphones, selected call-app scope, silence hint, and device changes. Automated tests intentionally do not record private conversations or grant TCC access.
