@@ -20,6 +20,7 @@
 - The final DMG and the appcast's Ed25519 signatures verify using the dedicated Hush signing key. Modified copies of both the appcast and archive are rejected by Sparkle's verification tool. The private key was generated in the local login Keychain and was never exported into source or release assets.
 - The release was first published as a prerelease with a signed appcast and versioned download URL. Using Sparkle's official CLI compiled from the pinned source, a disposable notarized build 3 downloaded the real GitHub DMG and upgraded successfully to build 4. The installed copy retains valid deep code signatures and an attached Apple ticket.
 - A second real download was deferred while an isolated test host was running. The test app remained build 3 after staging. Ending only that host triggered installation automatically and changed the test app to build 4, without a manual install action. Tests watched a separate host bundle and did not launch or terminate the user's Hush or access saved meetings.
+- After promotion to the latest stable release, Sparkle's read-only probe discovered 1.1.0 through the exact stable feed URL embedded in the app. A fresh download of the public release passes its SHA-256 checksum, Ed25519 payload verification, stapler validation and Gatekeeper assessment.
 - The updater tests cover meeting/restart guards separately from the real installer rehearsal. This does not replace the live-call/device and provider acceptance checks below.
 
 ## Requires device/account acceptance testing
