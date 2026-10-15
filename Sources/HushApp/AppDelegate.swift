@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         state.showCard = { [weak self] event, app in self?.presentCard(event, app: app) }
         state.dismissCard = { [weak self] in self?.hideCard() }
         state.recordingChanged = { [weak self] recording in self?.updateStatus(recording) }
+        state.updater = AppUpdater(isDemo: state.isDemo, isBusy: { [weak self] in self?.state.preventsUpdateRestart ?? true })
         if !state.isDemo {
             let center = UNUserNotificationCenter.current(); center.delegate = self
             let record = UNNotificationAction(identifier: "RECORD", title: "Record", options: [.foreground])
@@ -46,12 +47,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         })
         Task {
             await state.load()
+            state.updater?.start()
             if state.isDemo { openMain() }
             else if !state.preferences.onboardingCompleted { openOnboarding() }
         }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard state.capture.isRecording || state.busy else { return .terminateNow }
+        guard state.preventsUpdateRestart else { return .terminateNow }
         let alert = NSAlert(); alert.messageText = "Hush is still working"
         alert.informativeText = "Stop the recording and wait for notes to finish before quitting."
         alert.addButton(withTitle: "Keep Hush open"); alert.runModal()

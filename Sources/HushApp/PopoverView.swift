@@ -20,6 +20,11 @@ struct PopoverView: View {
                 ProgressView().progressViewStyle(.linear).tint(DesignTokens.soft)
             } else { idle }
             Rectangle().fill(DesignTokens.hairline).frame(height: DesignTokens.divider)
+            if let updater = state.updater, updater.updateAvailable {
+                Button("Update available…") { updater.checkForUpdates() }
+                    .buttonStyle(.plain).font(DesignTokens.chrome)
+                    .disabled(!updater.canCheck || state.preventsUpdateRestart)
+            }
             HStack {
                 Button("Open notebook") { state.showMain?() }.buttonStyle(.plain)
                 Spacer()

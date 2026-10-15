@@ -1,10 +1,12 @@
 # Hush
 
-A native, local-first meeting notebook for macOS 26 and Apple Silicon. Swift 6, SwiftUI and Apple frameworks; no third-party runtime dependencies.
+A native, local-first meeting notebook for macOS 26 and Apple Silicon. Swift 6, SwiftUI and Apple frameworks, with pinned Sparkle 2.10.0 for secure automatic updates.
 
 The interface and PDF exports use SF Pro, with quiet paper tones and a single recording accent.
 
 [Download Hush for Apple Silicon](https://github.com/samizar/hush-meet/releases/latest/download/Hush.dmg). Open the disk image and drag Hush to Applications. The app is Developer ID signed and notarized by Apple.
+
+Hush 1.1 and later check for updates daily, download signed updates automatically, and install them when Hush quits. Recording, transcription, and note generation block update restarts. You can change update preferences or choose **Check for Updates…** in General settings or the Hush menu. Install Hush in Applications rather than running it from its DMG. Users of 1.0 must install 1.1 manually once to gain the updater.
 
 ## Build and run
 
@@ -53,9 +55,9 @@ The default directory is the app's Application Support folder under `Hush/Meetin
 
 Templates are installed into `Hush/Templates` in Application Support. Each is a Markdown file with an instruction section, a `---` separator, and an output layout. Placeholders: `{{title}}`, `{{summary}}`, `{{key_points}}`, `{{decisions}}`, `{{decisions_table}}`, `{{action_items}}`, `{{open_questions}}`, and `{{user_notes}}`. Existing templates are never overwritten. Duplicate in Settings to create another template.
 
-Search uses system SQLite FTS5 entirely in memory, rebuilt from meeting folders. There is no plaintext database journal, telemetry, account, backend, crash SDK or updater. Default providers make no application HTTP requests. Apple manages its own speech/model asset downloads.
+Search uses system SQLite FTS5 entirely in memory, rebuilt from meeting folders. There is no plaintext database journal, telemetry, account, backend or crash SDK. Default meeting providers make no application HTTP requests. Apple manages its own speech/model asset downloads. Automatic update checks contact GitHub and its download CDN with ordinary version/user-agent information; meeting content and provider keys are never included. System profiling is disabled. General settings can disable background checks.
 
-All application HTTP goes through `NetworkClient`, with exact configured host matching, HTTPS, no redirects, no persisted cookies, credentials or response cache. API keys are sent in headers. The app confirms cloud use before a recording or a retry. Automatic cloud recordings ask for confirmation instead of silently starting.
+All first-party meeting/provider HTTP goes through `NetworkClient`, with exact configured host matching, HTTPS, no redirects, no persisted cookies, credentials or response cache. API keys are sent in headers. The app confirms cloud use before a recording or a retry. Automatic cloud recordings ask for confirmation instead of silently starting. Sparkle's separate update transport uses HTTPS, an Ed25519-signed feed, and signed update archives verified before extraction. Developer ID signing and Apple notarization protect the app and installer as well. Preview mode never starts the updater.
 
 ## Verification
 
@@ -83,9 +85,19 @@ HUSH_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' \
 HUSH_NOTARY_PROFILE='your-notary-profile' ./scripts/package.sh
 ```
 
-No certificate, password, API key or notarization credential belongs in this repository. Updates are manual in v1. Notarization and its Apple upload occur only when the release operator supplies the profile.
+No certificate, password, API key or notarization credential belongs in this repository. The dedicated Sparkle private key stays in the release operator's login Keychain under account `app.hush.mac`. Only its public key is embedded in the app. Preserve that Keychain key for future releases; do not generate a replacement or rotate the Apple and Sparkle keys together.
 
 An existing signed-in Xcode account can also notarize an app without a `notarytool` profile: archive the **Hush** scheme, open the archive in Organizer, and choose **Distribute App → Direct Distribution**. Once Apple approves it, export the notarized app from Organizer, or use `xcodebuild -exportNotarizedApp` with the archive path managed by Organizer. Set `HUSH_APP_SOURCE` to that exported app when packaging to preserve its notarization ticket. A newly created DMG still needs its own notarization ticket before publication. The release configuration uses developer team `ZUT6837GB5`.
+
+For each release, increase `CFBundleVersion` monotonically and update `CFBundleShortVersionString` in `Resources/Info.plist` and the matching project-generator settings. Run the tests, archive and export with Xcode so Sparkle's nested helpers are re-signed for distribution, and notarize/staple the final DMG. Push the source to `main`, then publish:
+
+```sh
+./scripts/publish-release.sh v1.1.0 build/Hush.dmg build/release-notes.md
+```
+
+The publisher validates the DMG signature and Apple ticket, checks the update key, generates and verifies the signed appcast and payload, uploads all files to a draft release, and only then publishes it as latest. The stable feed URL is the latest GitHub release's `appcast.xml`; update payload URLs include their immutable version tags. Keep the generated `Updates/appcast.xml` in source control for compatible-version history. Every future public release must include a signed appcast; publishing a release without it would break the latest-release feed URL. Releases created through other GitHub tools need the same signed assets and checks. See [Sparkle's release guidance](https://sparkle-project.org/documentation/publishing/).
+
+For an installation rehearsal before existing clients see the update, set `HUSH_RELEASE_STAGE=1` when running the publisher. It exposes a prerelease for testing while leaving the stable feed untouched. Test a disposable older app against the versioned `appcast.xml` asset, then promote with `gh release edit vVERSION --repo samizar/hush-meet --prerelease=false --latest`. Never change a DMG or appcast after signing, and never replace the contents of an already published version.
 
 ## Project
 

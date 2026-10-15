@@ -16,4 +16,4 @@ for tree in [root / 'Sources', root / 'Vendor']:
             errors.append(str(file.relative_to(root)))
 if errors:
     raise SystemExit('Network bypass found: ' + ', '.join(errors))
-print('Network audit passed: NetworkClient is the only HTTP implementation.')
+print('Network audit passed: NetworkClient is the only first-party HTTP implementation. Pinned Sparkle handles signed updates separately.')

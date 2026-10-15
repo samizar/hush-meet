@@ -22,6 +22,7 @@ final class AppState {
     var transcriptExpanded = false
     var notice: String?
     var busy = false
+    var updater: AppUpdater?
     var currentID: UUID?
     var elapsed: TimeInterval = 0
     var liveNotes = ""
@@ -57,6 +58,7 @@ final class AppState {
     var current: Meeting? { meetings.first { $0.id == currentID } }
     var filteredMeetings: [Meeting] { searchIDs.map { ids in meetings.filter { ids.contains($0.id) } } ?? meetings }
     var canRecord: Bool { !busy && !capture.isRecording && !capture.isPreparing && store != nil }
+    var preventsUpdateRestart: Bool { busy || capture.isRecording || capture.isPreparing }
     init() {
         isDemo = ProcessInfo.processInfo.arguments.contains("--demo")
         if isDemo { seedDemo() }

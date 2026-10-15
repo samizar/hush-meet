@@ -47,7 +47,24 @@ struct HushSettingsView: View {
                     }
                 }
             }
-            Section { Text("Hush 1.0 · Updates are installed manually. No background checks.").font(DesignTokens.small).foregroundStyle(DesignTokens.soft) }
+            Section("Updates") {
+                if let updater = state.updater, !state.isDemo {
+                    Toggle("Check for updates automatically", isOn: Binding(get: { updater.automaticChecks }, set: { updater.setAutomaticChecks($0) }))
+                    Toggle("Download and install updates automatically", isOn: Binding(get: { updater.automaticInstallation }, set: { updater.setAutomaticInstallation($0) }))
+                        .disabled(!updater.automaticChecks)
+                    Text("Checks daily. Signed updates install when Hush quits. Recordings and notes are never interrupted.")
+                        .font(DesignTokens.small).foregroundStyle(DesignTokens.soft)
+                    HStack {
+                        Button("Check for Updates…") { updater.checkForUpdates() }
+                            .disabled(!updater.canCheck || state.preventsUpdateRestart)
+                        if let date = updater.lastChecked { Text(date, format: .dateTime.month().day().hour().minute()).font(DesignTokens.small).foregroundStyle(DesignTokens.soft) }
+                    }
+                    if let status = updater.status { Text(status).font(DesignTokens.small).foregroundStyle(DesignTokens.soft) }
+                    Text("Update checks contact GitHub. Meeting content and API keys are never included.").font(DesignTokens.small).foregroundStyle(DesignTokens.soft)
+                } else { Text("Updates are disabled in preview mode.").foregroundStyle(DesignTokens.soft) }
+                Text("Hush \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1.0")")
+                    .font(DesignTokens.small).foregroundStyle(DesignTokens.soft)
+            }
             settingsNotice
         }.formStyle(.grouped).scrollContentBackground(.hidden)
     }
@@ -153,6 +170,7 @@ struct HushSettingsView: View {
                 privacyLine("No account, server, analytics, or crash reporting.")
                 privacyLine("Default speech and notes models run on this Mac.")
                 privacyLine("Apple may download its models once before first use.")
+                privacyLine("Automatic updates contact GitHub. Disable them in General settings.")
                 privacyLine("Cloud providers run only when you choose them. No silent fallback.")
                 privacyLine("API keys live in the Keychain, never in meeting files.")
                 privacyLine("Search stays in memory and is rebuilt from your files.")
