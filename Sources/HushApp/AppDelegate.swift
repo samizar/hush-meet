@@ -79,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
     }
 
-    /// `--demo-open tasks|transcript|popover|card|onboarding|settings:<tab>` opens one surface for review.
+    /// `--demo-open tasks|transcript|ask|ask:answer|popover|card|onboarding|settings:<tab>` opens one surface for review.
     private func openDemo() {
         let arguments = ProcessInfo.processInfo.arguments
         let target = arguments.firstIndex(of: "--demo-open").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } ?? "home"
@@ -88,6 +88,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         case "transcript":
             if let first = state.meetings.first { state.select(first.id) }
             state.meetingTab = .transcript; openMain()
+        case "ask", "ask:answer":
+            guard let first = state.meetings.first else { openMain(); return }
+            state.select(first.id); state.meetingTab = .ask; openMain()
+            if target == "ask:answer" { Task { try? await Task.sleep(for: .milliseconds(400)); state.ask(AskSuggestion.all[0].question, in: first.id) } }
         case "popover": openMain(); Task { try? await Task.sleep(for: .milliseconds(400)); togglePopover() }
         case "card": presentCard(state.calendar.meetings.first, app: nil)
         case "onboarding": openOnboarding()

@@ -7,10 +7,19 @@ extension AppState {
     // MARK: Queue
 
     /// Asks before sending a meeting to a cloud provider. Returns false if the person declines.
-    func confirmProviders() -> Bool {
-        guard preferences.providers.leavesMac, !isDemo else { return true }
-        let alert = NSAlert(); alert.messageText = "Send this meeting to \(preferences.providers.destinations.joined(separator: " and "))?"
-        alert.informativeText = preferences.providers.dataFlow
+    /// For a question (Ask), only the notes provider matters: questions never go to transcription.
+    func confirmProviders(askingAbout question: Meeting? = nil) -> Bool {
+        let providers = preferences.providers
+        guard question == nil ? providers.leavesMac : !providers.notes.isOnDevice, !isDemo else { return true }
+        let alert = NSAlert(); alert.messageText = "Send this meeting to \(providers.destinations.joined(separator: " and "))?"
+        alert.informativeText = providers.dataFlow
+        if let question {
+            let name = providers.notes == .compatible ? (providers.notesHost ?? "your server") : providers.notes.name
+            alert.messageText = "Send questions about this meeting to \(name)?"
+            let sent = question.includesSideNotes && !question.userNotes.isEmpty
+                ? "this meeting's notes, your side notes and the parts of its transcript that match" : "this meeting's notes and the parts of its transcript that match"
+            alert.informativeText = "Each question goes to \(name) with \(sent). Answers stay on this page unless you add one to your side notes."
+        }
         alert.addButton(withTitle: "Continue"); alert.addButton(withTitle: "Cancel")
         NSApp.activate(ignoringOtherApps: true)
         return alert.runModal() == .alertFirstButtonReturn

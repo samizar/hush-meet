@@ -90,7 +90,7 @@ struct TranscriptView: View {
                 Text("Nothing matches “\(query)”.").font(DesignTokens.body).foregroundStyle(DesignTokens.soft).padding(.vertical, DesignTokens.block)
             } else {
                 LazyVStack(alignment: .leading, spacing: DesignTokens.inset) {
-                    ForEach(visible, id: \.offset) { _, turn in row(turn) }
+                    ForEach(visible, id: \.offset) { offset, turn in row(turn, focused: state.transcriptFocus == offset).id(Self.anchor(offset)) }
                 }
             }
         }
@@ -147,8 +147,11 @@ struct TranscriptView: View {
         .overlay(RoundedRectangle(cornerRadius: DesignTokens.cardRadius).strokeBorder(DesignTokens.hairline))
     }
 
-    private func row(_ turn: Transcript.Turn) -> some View {
-        let active = player.isPlaying && player.position >= turn.start && player.position < turn.end + 1
+    /// Scroll target for one turn, used by cited timestamps in Ask.
+    static func anchor(_ turn: Int) -> String { "turn-\(turn)" }
+
+    private func row(_ turn: Transcript.Turn, focused: Bool = false) -> some View {
+        let active = (player.isPlaying && player.position >= turn.start && player.position < turn.end + 1) || focused
         return HStack(alignment: .firstTextBaseline, spacing: DesignTokens.inset) {
             Button { player.isAvailable ? player.seek(turn.start) : () } label: {
                 Text(Transcript.timestamp(turn.start)).font(DesignTokens.mono)

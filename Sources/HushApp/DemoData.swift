@@ -134,6 +134,32 @@ extension AppState {
         }
     }
 
+    /// A canned Ask answer built from the sample notes, citing the sample transcript. No model is called.
+    func demoAnswer(_ question: String, for meeting: Meeting) -> String {
+        let notes = meeting.structuredNotes
+        let q = question.lowercased()
+        func list(_ items: [String]) -> String { items.map { "- " + $0 }.joined(separator: "\n") }
+        if ["decide", "decision", "agree"].contains(where: q.contains) {
+            guard let decisions = notes?.decisions, !decisions.isEmpty else {
+                return "No decision was recorded. The closest was agreeing to run a two-week pilot and review it together at the end [01:16]."
+            }
+            return "You agreed:\n" + list(decisions) + "\n\nThe next step came up at [01:16]."
+        }
+        if ["owe", "my action", "i need to", "follow up"].contains(where: q.contains) {
+            let cites = [" [00:58]", " [01:39]"]
+            let mine = (notes?.actionItems ?? []).filter { $0.owner == "Me" }.enumerated().map { index, item in
+                item.title + ((item.dueText ?? item.dueDate).map { " (\($0))" } ?? "") + (index < cites.count ? cites[index] : "")
+            }
+            return mine.isEmpty ? "Nothing was assigned to you in this meeting." : "You said you'd:\n" + list(mine)
+        }
+        if ["open", "unresolved", "question"].contains(where: q.contains) {
+            guard let open = notes?.openQuestions, !open.isEmpty else { return "Nothing was left open in the notes. The plan to review the pilot at the end [01:16] is the only follow-up." }
+            return "Still open:\n" + list(open)
+        }
+        let summary = notes?.summary.components(separatedBy: ". ").first.map { $0.hasSuffix(".") ? $0 : $0 + "." } ?? "The notes don't cover that."
+        return summary + " The main point was that nothing leaves the laptop [00:30]."
+    }
+
     private static func isoDay(_ offset: Int) -> String {
         let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd"; formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter.string(from: Calendar.current.date(byAdding: .day, value: offset, to: .now) ?? .now)

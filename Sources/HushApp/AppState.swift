@@ -100,6 +100,10 @@ final class AppState {
     // Autosave.
     var savingIDs = Set<UUID>()
     var saveErrors: [UUID: String] = [:]
+    // Ask. Questions and answers live in memory for this session only.
+    var conversations: [UUID: [AskExchange]] = [:]
+    /// The transcript turn a cited timestamp points at.
+    var transcriptFocus: Int?
 
     let capture = CaptureSession()
     let calendar = CalendarService()
@@ -131,6 +135,12 @@ final class AppState {
     @ObservationIgnored var jobProviders: [UUID: ProviderConfiguration] = [:]
     @ObservationIgnored var recordingActivity: NSObjectProtocol?
     @ObservationIgnored var processingActivity: NSObjectProtocol?
+    /// Running Ask requests, by question.
+    @ObservationIgnored var askTasks: [UUID: Task<Void, Never>] = [:]
+    /// The cloud configuration the person agreed to for each meeting's questions this session.
+    @ObservationIgnored var askConsent: [UUID: ProviderConfiguration] = [:]
+    /// Tests replace the provider; preview mode never calls it.
+    @ObservationIgnored var answerers: (ProviderConfiguration) -> any AnswerGenerator = AnswerProviders.make
 
     // MARK: Derived state
 
@@ -212,7 +222,7 @@ final class AppState {
     func select(_ id: UUID) {
         let changed = selectedID != id
         route = .meeting(id)
-        if changed { markdown = ""; displayedTranscript = nil }
+        if changed { markdown = ""; displayedTranscript = nil; transcriptFocus = nil }
         selectionTask?.cancel()
         guard !isDemo else { loadDemo(id); return }
         selectionTask = Task {

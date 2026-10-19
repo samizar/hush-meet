@@ -118,4 +118,28 @@ public struct LocalNotesProvider: NotesProvider {
         } catch { throw Self.incomplete }
     }
     private static var incomplete: HushError { .message("The local model returned incomplete notes. Your transcript is saved. Try a chat model with structured-output support, or use a shorter template.") }
+
+    /// A plain-text reply for Ask. Routing is checked first, exactly as for notes.
+    public func answer(system: String, user: String) async throws -> String {
+        try await preflight()
+        try Task.checkCancellation()
+        let (base, client) = try connection()
+        let messages = [["role": "system", "content": system], ["role": "user", "content": user]]
+        let cutOff = HushError.message("The local model stopped before finishing its answer. Try a narrower question.")
+        if configuration.notes == .ollama {
+            let data = try await client.json(url: base.appendingPathComponent("api/chat"), body: [
+                "model": configuration.resolvedModel, "messages": messages, "stream": false,
+                "options": ["temperature": 0.2, "num_ctx": 8192, "num_predict": 700], "keep_alive": "2m"
+            ], headers: [:])
+            let response = try CloudNotesProvider.object(data)
+            guard response["done"] as? Bool == true, response["done_reason"] as? String != "length" else { throw cutOff }
+            return (response["message"] as? [String: Any])?["content"] as? String ?? ""
+        }
+        let data = try await client.json(url: base.appendingPathComponent("chat/completions"), body: [
+            "model": configuration.resolvedModel, "messages": messages, "stream": false, "temperature": 0.2, "max_tokens": 700
+        ], headers: try headers())
+        let choice = (try CloudNotesProvider.object(data)["choices"] as? [[String: Any]])?.first
+        guard choice?["finish_reason"] as? String != "length" else { throw cutOff }
+        return (choice?["message"] as? [String: Any])?["content"] as? String ?? ""
+    }
 }

@@ -30,6 +30,8 @@ struct HushApp: App {
                         .disabled(delegate.state.selected == nil)
                     Button("Transcript") { delegate.state.meetingTab = .transcript }.keyboardShortcut("2")
                         .disabled(delegate.state.selected == nil)
+                    Button("Ask") { delegate.state.meetingTab = .ask }.keyboardShortcut("3")
+                        .disabled(delegate.state.selected == nil)
                     Button(delegate.state.inspectorShown ? "Hide Side Notes" : "Show Side Notes") { delegate.state.toggleInspector() }
                         .keyboardShortcut("i", modifiers: [.command, .option])
                 }

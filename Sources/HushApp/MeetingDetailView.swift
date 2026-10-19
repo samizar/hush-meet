@@ -3,9 +3,15 @@ import HushKit
 import MuesliCore
 
 enum MeetingTab: String, CaseIterable, Identifiable {
-    case notes, transcript
+    case notes, transcript, ask
     var id: String { rawValue }
-    var title: String { self == .notes ? "Notes" : "Transcript" }
+    var title: String {
+        switch self {
+        case .notes: "Notes"
+        case .transcript: "Transcript"
+        case .ask: "Ask"
+        }
+    }
 }
 
 /// One meeting as a page.
@@ -22,28 +28,50 @@ struct MeetingDetailView: View {
     private var isLive: Bool { state.currentID == meeting.id && (state.capture.isRecording || state.isStopping) }
     private var template: NoteTemplate? { state.template(for: meeting) }
 
+    private var showsAsk: Bool { tab == .ask && !(isLive && state.capture.isRecording) }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: DesignTokens.block) {
-                header
-                if isLive && state.capture.isRecording {
-                    LiveMeetingView(state: state, meeting: meeting)
-                } else {
-                    controls
-                    content
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: DesignTokens.block) {
+                    header
+                    if isLive && state.capture.isRecording {
+                        LiveMeetingView(state: state, meeting: meeting)
+                    } else {
+                        controls
+                        content
+                    }
                 }
+                .frame(maxWidth: isLive ? 1100 : DesignTokens.pageWidth, alignment: .leading)
+                .padding(.horizontal, DesignTokens.block + 8).padding(.top, DesignTokens.margin - 8).padding(.bottom, showsAsk ? DesignTokens.block : 80)
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: isLive ? 1100 : DesignTokens.pageWidth, alignment: .leading)
-            .padding(.horizontal, DesignTokens.block + 8).padding(.top, DesignTokens.margin - 8).padding(.bottom, 80)
-            .frame(maxWidth: .infinity)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if showsAsk { AskComposer(state: state, meeting: meeting) }
+            }
+            .onChange(of: state.exchanges(for: meeting.id).count) { _, count in
+                guard count > 0 else { return }
+                withAnimation(DesignTokens.fade) { proxy.scrollTo(AskView.endID, anchor: .bottom) }
+            }
+            .onChange(of: state.exchanges(for: meeting.id).last?.isPending) { _, pending in
+                // A finished answer reads from its question down.
+                guard pending == false, let last = state.exchanges(for: meeting.id).last else { return }
+                withAnimation(DesignTokens.fade) { proxy.scrollTo(last.id, anchor: .top) }
+            }
+            .onChange(of: state.transcriptFocus) { _, focus in
+                guard let focus else { return }
+                Task { try? await Task.sleep(for: .milliseconds(120)); withAnimation(DesignTokens.fade) { proxy.scrollTo(TranscriptView.anchor(focus), anchor: .center) } }
+            }
         }
         .background(DesignTokens.paper)
         .scrollEdgeEffectStyle(.soft, for: .top)
+        .scrollEdgeEffectStyle(showsAsk ? .soft : .automatic, for: .bottom)
         .onAppear { draftTitle = meeting.title }
         .onChange(of: meeting.id) { draftTitle = meeting.title; editing = false; renaming = false }
         .onChange(of: meeting.title) { if !renaming { draftTitle = meeting.title } }
         .onChange(of: titleFocused) { if !titleFocused && renaming { commitTitle(); renaming = false } }
         .onChange(of: editing) { if editing { draftNotes = state.markdown } }
+        .onChange(of: tab) { if tab != .transcript { state.transcriptFocus = nil } }
     }
 
     // MARK: Header
@@ -102,6 +130,10 @@ struct MeetingDetailView: View {
                 IconButton(symbol: "pencil", help: "Edit notes (⌘E)") { editing = true }
                     .disabled(state.markdown.isEmpty || state.isQueued(meeting.id))
             }
+            if tab == .ask && !state.exchanges(for: meeting.id).isEmpty {
+                Button("Clear") { state.clearConversation(meeting.id) }.buttonStyle(.hushQuiet)
+                    .help("Remove these questions and answers. Anything you added to side notes stays.")
+            }
             if tab == .notes && editing {
                 Button("Cancel") { editing = false }.buttonStyle(.hushQuiet).keyboardShortcut(.cancelAction)
                 Button("Save") { state.saveEditedNotes(meeting.id, markdown: draftNotes); editing = false }
@@ -116,6 +148,8 @@ struct MeetingDetailView: View {
     @ViewBuilder private var content: some View {
         if tab == .transcript {
             TranscriptView(state: state, meeting: meeting, transcript: state.displayedTranscript)
+        } else if tab == .ask {
+            AskView(state: state, meeting: meeting)
         } else if editing {
             NotesEditor(text: $draftNotes)
         } else {
