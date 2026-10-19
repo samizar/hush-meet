@@ -6,6 +6,26 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>Hush</title>
         <item>
+            <title>2.0.1</title>
+            <pubDate>Mon, 19 Oct 2026 18:20:44 +0300</pubDate>
+            <link>https://github.com/samizar/hush-meet/releases</link>
+            <sparkle:version>10</sparkle:version>
+            <sparkle:shortVersionString>2.0.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[A fix-up release for Hush 2.0.
+
+- Notes no longer fail with "Detected content likely to be unsafe". When Apple's on-device safety filter rejects an ordinary conversation, Hush now retries that part with Apple's summarizing mode. Open a meeting that failed this way and choose Write notes again.
+- Hush can save while your Mac is locked. Transcript checkpoints, finished transcripts and notes used to fail if the screen locked during a call.
+- The selected meeting in the sidebar is readable again; its text no longer stays dark on the dark highlight.
+- Narrow windows no longer clip the notebook. Side notes sit beside the page when there's room and open as a floating panel when there isn't (⌥⌘I or the toolbar button).
+- Clearer messages for every other on-device model error.
+
+Verified with 165 automated tests, including the new fallback against Apple's real on-device model. Apple Silicon; macOS 26 or later.
+]]></description>
+            <enclosure url="https://github.com/samizar/hush-meet/releases/download/v2.0.1/Hush.dmg" length="2903612" type="application/octet-stream" sparkle:edSignature="0NNLST32s1G85M1M/GInafN8WjP80lDBiXx+p6plXSYaHvvpv4kQ1D/hrntzrOBIarm3bxzvY1v1HIs4WRTwCQ=="/>
+        </item>
+        <item>
             <title>2.0.0</title>
             <pubDate>Mon, 19 Oct 2026 17:41:50 +0300</pubDate>
             <link>https://github.com/samizar/hush-meet/releases</link>
@@ -65,30 +85,9 @@ Verified with 129 tests, including real Apple Speech, Apple on-device notes, and
 ]]></description>
             <enclosure url="https://github.com/samizar/hush-meet/releases/download/v1.2.0/Hush.dmg" length="2289296" type="application/octet-stream" sparkle:edSignature="8SP8NglI3E0IWoJlW3gADtS3QVyTbtY2AsHI0gBSK1YMR5OeTsoiEo1IY1lXiq7H7x/15XPBRb6gfjO39OvUDA=="/>
         </item>
-        <item>
-            <title>1.1.1</title>
-            <pubDate>Thu, 15 Oct 2026 14:51:54 +0300</pubDate>
-            <link>https://github.com/samizar/hush-meet/releases</link>
-            <sparkle:version>6</sparkle:version>
-            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[Fixes a recording that could stay on “Finishing the transcript…” when the other side of a call produced no audio.
-
-- Empty audio channels now finish immediately; transcription shutdown has a deadline and properly cancels Apple Speech.
-- Processing can be cancelled safely. Saved recordings and transcripts remain available for retry, and controls recover after errors.
-- Model tests show progress and results directly in Settings. The on-device notes test now generates notes from a short example.
-- Adds private, local diagnostic logs under Settings → Privacy. Logs contain processing steps and error numbers, never meeting content, audio or API keys, and are never uploaded.
-
-Verified with 112 automated tests, including real on-device speech and notes using synthetic inputs. Apple Silicon; macOS 26 or later.
-
-If version 1.1.0 is already stuck, force quit Hush once, reopen it, then choose Check for Updates. After installing, select the unfinished meeting and click Retry transcription to recover its saved audio.
-]]></description>
-            <enclosure url="https://github.com/samizar/hush-meet/releases/download/v1.1.1/Hush.dmg" length="2222633" type="application/octet-stream" sparkle:edSignature="5vrxRhzZMZBYuMuz1rsOJvsYlfIpsEkfu9OY2jWqK5UQgIj09idPH7Y24mcWro3ul+1WFrMheQghMs/xBqYZDg=="/>
-        </item>
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: y7Cc/CcvLizKKtvQeaYcMMq4j9YVTWHaDBVLo1G4wxlwl+L/uykTnNu+hfGhU8XFU1Mz34ALzsAVVRkIVsTIBA==
-length: 7732
+edSignature: KzAL+FIFAgamigtz9EurQ5jPsV3Ky06D/MwHCGK0w0vIKDyMoCOhRnKW09GnM6qkveoxgKql9XI9q7zVfHtrDQ==
+length: 7624
 -->
