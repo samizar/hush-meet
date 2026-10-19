@@ -97,6 +97,11 @@ final class AppState {
         inspectorShown.toggle()
         if !isDemo { UserDefaults.standard.set(inspectorShown, forKey: "hush.sideNotesVisible") }
     }
+    /// Narrow windows float side notes over the page only when asked, and never remember it.
+    var sideNotesDocked = true
+    var sideNotesFloating = false
+    func toggleSideNotes() { if sideNotesDocked { toggleInspector() } else { sideNotesFloating.toggle() } }
+    var sideNotesVisible: Bool { sideNotesDocked ? inspectorShown : sideNotesFloating }
     // Autosave.
     var savingIDs = Set<UUID>()
     var saveErrors: [UUID: String] = [:]

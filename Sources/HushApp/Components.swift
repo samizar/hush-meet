@@ -223,9 +223,8 @@ struct HighlightedText: View {
             guard !buffer.isEmpty else { return }
             var part = AttributedString(buffer)
             if highlighted {
-                part.foregroundColor = DesignTokens.ink
-                part.font = DesignTokens.small.weight(.semibold)
-                part.backgroundColor = DesignTokens.amber.opacity(0.18)
+                part.font = DesignTokens.small.weight(.bold)
+                part.backgroundColor = DesignTokens.amber.opacity(0.22)
             }
             result += part; buffer = ""
         }

@@ -103,44 +103,52 @@ struct MeetingDetailView: View {
     // MARK: Controls
 
     private var controls: some View {
-        HStack(spacing: DesignTokens.space) {
-            Picker("View", selection: $tab) {
-                ForEach(MeetingTab.allCases) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented).labelsHidden().fixedSize()
-            Spacer()
-            if tab == .notes && !editing {
-                Menu {
-                    ForEach(state.templates) { item in
-                        Button { state.changeTemplate(item.id, for: meeting.id) } label: {
-                            if item.id == meeting.templateID { Label(item.name, systemImage: "checkmark") } else { Text(item.name) }
-                        }
-                    }
-                    Divider()
-                    Button("Edit templates…") { state.showSettings?(.templates) }
-                } label: {
-                    Label(template?.name ?? "Template", systemImage: "doc.text").font(DesignTokens.chrome)
-                }
-                .menuStyle(.button).buttonStyle(.hushSecondary).frame(maxWidth: 180)
-                .disabled(state.isQueued(meeting.id) || isLive)
-                .help("Choose how these notes are written")
-                if meeting.transcriptionFinal {
-                    IconButton(symbol: "arrow.clockwise", help: "Write notes again") { state.regenerate(meeting.id) }
-                        .disabled(state.isQueued(meeting.id))
-                }
-                IconButton(symbol: "pencil", help: "Edit notes (⌘E)") { editing = true }
-                    .disabled(state.markdown.isEmpty || state.isQueued(meeting.id))
-            }
-            if tab == .ask && !state.exchanges(for: meeting.id).isEmpty {
-                Button("Clear") { state.clearConversation(meeting.id) }.buttonStyle(.hushQuiet)
-                    .help("Remove these questions and answers. Anything you added to side notes stays.")
-            }
-            if tab == .notes && editing {
-                Button("Cancel") { editing = false }.buttonStyle(.hushQuiet).keyboardShortcut(.cancelAction)
-                Button("Save") { state.saveEditedNotes(meeting.id, markdown: draftNotes); editing = false }
-                    .buttonStyle(.hushPrimary).keyboardShortcut("s", modifiers: .command)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: DesignTokens.space) { tabPicker; Spacer(minLength: DesignTokens.gap); tabActions }
+            VStack(alignment: .leading, spacing: DesignTokens.space) {
+                tabPicker
+                HStack(spacing: DesignTokens.space) { tabActions }
             }
         }
         .frame(minHeight: DesignTokens.buttonHeight)
+    }
+    private var tabPicker: some View {
+        Picker("View", selection: $tab) {
+            ForEach(MeetingTab.allCases) { Text($0.title).tag($0) }
+        }.pickerStyle(.segmented).labelsHidden().fixedSize()
+    }
+    @ViewBuilder private var tabActions: some View {
+        if tab == .notes && !editing {
+            Menu {
+                ForEach(state.templates) { item in
+                    Button { state.changeTemplate(item.id, for: meeting.id) } label: {
+                        if item.id == meeting.templateID { Label(item.name, systemImage: "checkmark") } else { Text(item.name) }
+                    }
+                }
+                Divider()
+                Button("Edit templates…") { state.showSettings?(.templates) }
+            } label: {
+                Label(template?.name ?? "Template", systemImage: "doc.text").font(DesignTokens.chrome)
+            }
+            .menuStyle(.button).buttonStyle(.hushSecondary).frame(maxWidth: 180)
+            .disabled(state.isQueued(meeting.id) || isLive)
+            .help("Choose how these notes are written")
+            if meeting.transcriptionFinal {
+                IconButton(symbol: "arrow.clockwise", help: "Write notes again") { state.regenerate(meeting.id) }
+                    .disabled(state.isQueued(meeting.id))
+            }
+            IconButton(symbol: "pencil", help: "Edit notes (⌘E)") { editing = true }
+                .disabled(state.markdown.isEmpty || state.isQueued(meeting.id))
+        }
+        if tab == .ask && !state.exchanges(for: meeting.id).isEmpty {
+            Button("Clear") { state.clearConversation(meeting.id) }.buttonStyle(.hushQuiet)
+                .help("Remove these questions and answers. Anything you added to side notes stays.")
+        }
+        if tab == .notes && editing {
+            Button("Cancel") { editing = false }.buttonStyle(.hushQuiet).keyboardShortcut(.cancelAction)
+            Button("Save") { state.saveEditedNotes(meeting.id, markdown: draftNotes); editing = false }
+                .buttonStyle(.hushPrimary).keyboardShortcut("s", modifiers: .command)
+        }
     }
 
     // MARK: Content
@@ -237,6 +245,14 @@ struct FailureCard: View {
     @Bindable var state: AppState
     let meeting: Meeting
     var showTranscript: () -> Void
+    @ViewBuilder private var failureActions: some View {
+        Button(meeting.transcriptionFinal ? "Write notes again" : "Try again") { state.retry(meeting.id) }
+            .buttonStyle(.hushPrimary).disabled(state.isQueued(meeting.id))
+        Button("AI model settings") { state.showSettings?(.models) }.buttonStyle(.hushSecondary)
+        if state.displayedTranscript?.segments.isEmpty == false {
+            Button("Read transcript", action: showTranscript).buttonStyle(.hushQuiet)
+        }
+    }
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: DesignTokens.gap) {
@@ -248,13 +264,10 @@ struct FailureCard: View {
                             .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     }
                 }
-                HStack(spacing: DesignTokens.space) {
-                    Button(meeting.transcriptionFinal ? "Write notes again" : "Try again") { state.retry(meeting.id) }
-                        .buttonStyle(.hushPrimary).disabled(state.isQueued(meeting.id))
-                    Button("AI model settings") { state.showSettings?(.models) }.buttonStyle(.hushSecondary)
-                    if state.displayedTranscript?.segments.isEmpty == false {
-                        Button("Read transcript", action: showTranscript).buttonStyle(.hushQuiet)
-                    }
+                // Side by side when there's room, stacked in narrow windows.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: DesignTokens.space) { failureActions }
+                    VStack(alignment: .leading, spacing: DesignTokens.space) { failureActions }
                 }
             }
         }

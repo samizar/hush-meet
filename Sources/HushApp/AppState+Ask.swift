@@ -128,7 +128,7 @@ extension AppState {
         let separator = existing.isEmpty ? "" : existing.hasSuffix("\n\n") ? "" : existing.hasSuffix("\n") ? "\n" : "\n\n"
         setSideNotes(id, text: existing + separator + entry)
         updateExchange(exchangeID, in: id) { $0.addedToSideNotes = true }
-        show(.success, "Added to side notes", action: inspectorShown ? nil : "Show") { [weak self] in self?.toggleInspector() }
+        show(.success, "Added to side notes", action: sideNotesVisible ? nil : "Show") { [weak self] in self?.toggleSideNotes() }
     }
 
     /// Opens the transcript at the turn a cited timestamp points to.

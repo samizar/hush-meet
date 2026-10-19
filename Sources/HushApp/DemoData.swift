@@ -8,6 +8,7 @@ extension AppState {
         // Preview never reads or changes real preferences.
         preferences = Preferences()
         preferences.onboardingCompleted = true; preferences.recordingConsent = true
+        if ProcessInfo.processInfo.arguments.contains("--demo-no-side-notes") { inspectorShown = false }
         preferences.calendarEnabled = true
         templates = Templates.builtIns.map { id, contents in NoteTemplate(url: URL(fileURLWithPath: "/preview/" + id + ".md"), contents: contents) }
         let day = Calendar.current.startOfDay(for: .now)
@@ -53,8 +54,8 @@ extension AppState {
             if title.hasPrefix("1:1") { meeting.userNotes = "Ask about research time\nCheck in on workload after launch"; meeting.speakerNames = ["them": "Alex"] }
             return meeting
         }
-        if ProcessInfo.processInfo.arguments.contains("--demo-failure"), meetings.count > 1 {
-            meetings[1].state = .failed; meetings[1].failure = "Apple's notes model is still getting ready. Try again after it finishes downloading."
+        if ProcessInfo.processInfo.arguments.contains("--demo-failure"), !meetings.isEmpty {
+            meetings[0].state = .failed; meetings[0].failure = "Apple's notes model is still getting ready. Try again after it finishes downloading."
         }
         demoMarkdown = Dictionary(uniqueKeysWithValues: meetings.compactMap { meeting in
             guard let notes = meeting.structuredNotes, let template = templates.first(where: { $0.id == meeting.templateID }) else { return nil }

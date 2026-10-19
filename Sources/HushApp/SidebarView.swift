@@ -124,16 +124,12 @@ struct MeetingRow: View {
     let meeting: Meeting
     let state: AppState
     var snippet: String?
-    /// Selected rows sit on the accent colour, so text switches to the system's selected style.
-    @Environment(\.backgroundProminence) private var prominence
-    private var selected: Bool { prominence == .increased }
-    private var primary: AnyShapeStyle { selected ? AnyShapeStyle(.white) : AnyShapeStyle(DesignTokens.ink) }
-    private var secondary: AnyShapeStyle { selected ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(DesignTokens.soft) }
-    private var tertiary: AnyShapeStyle { selected ? AnyShapeStyle(.white.opacity(0.7)) : AnyShapeStyle(DesignTokens.faint) }
+    /// Hierarchical styles only: the list swaps them for selected-text colours on the accent background.
+    /// Fixed colours would stay dark on a dark selection.
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(meeting.title).font(DesignTokens.chromeStrong).lineLimit(1).foregroundStyle(primary)
+                Text(meeting.title).font(DesignTokens.chromeStrong).lineLimit(1).foregroundStyle(.primary)
                 Spacer(minLength: 4)
                 MeetingStatusMark(meeting: meeting, state: state)
             }
@@ -143,13 +139,13 @@ struct MeetingRow: View {
                      : meeting.startedAt.formatted(.dateTime.month(.abbreviated).day()))
                 if meeting.endedAt != nil { Text("·"); Text(meeting.duration.spoken) }
             }
-            .font(DesignTokens.small.monospacedDigit()).foregroundStyle(secondary)
+            .font(DesignTokens.small.monospacedDigit()).foregroundStyle(.secondary)
             if let snippet, !snippet.isEmpty {
-                HighlightedText(text: snippet).font(DesignTokens.small).foregroundStyle(secondary)
+                HighlightedText(text: snippet).font(DesignTokens.small).foregroundStyle(.secondary)
             } else if let preview = meeting.preview {
-                Text(preview).font(DesignTokens.small).foregroundStyle(tertiary).lineLimit(2)
+                Text(preview).font(DesignTokens.small).foregroundStyle(.tertiary).lineLimit(2)
             } else if meeting.state == .failed {
-                Text("Needs attention").font(DesignTokens.small).foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(DesignTokens.amber))
+                Text("Needs attention").font(DesignTokens.small.weight(.medium)).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)

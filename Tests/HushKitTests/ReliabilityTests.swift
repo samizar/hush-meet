@@ -156,3 +156,21 @@ final class Counts: @unchecked Sendable {
     func add(_ value: Int) { lock.withLock { stored.append(value) } }
     var values: [Int] { lock.withLock { stored } }
 }
+
+@Suite("Apple notes fallback")
+struct AppleFallbackTests {
+    /// Runs the real on-device model. Enable with HUSH_RUN_MODEL_TESTS=1 on a Mac with Apple Intelligence.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["HUSH_RUN_MODEL_TESTS"] == "1"))
+    func permissiveGuardrailsStillProduceNotes() async throws {
+        let context = MeetingContext(title: "Launch check-in", start: Date(timeIntervalSince1970: 1_760_000_000))
+        let transcript = "[00:01] Me: We agreed to ship the beta on Friday.\n[00:09] Them: Sam will send the release checklist tomorrow, and we'll review open bugs on Thursday."
+        let result = try await AppleNotesProvider().summarizePermissively(system: Prompts.system, user: Prompts.single(transcript: transcript, context: context))
+        #expect(!result.notes.summary.isEmpty)
+        #expect(!result.notes.actionItems.isEmpty)
+    }
+
+    @Test func refusalsAreExplainedInPlainLanguage() {
+        let message = AppleNotesProvider.explain(.guardrailViolation(.init(debugDescription: "Detected content likely to be unsafe"))).localizedDescription
+        #expect(message.contains("Your transcript is saved") && !message.contains("unsafe"))
+    }
+}

@@ -186,8 +186,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             window.setFrameAutosaveName(state.isDemo ? "HushPreview3" : "HushNotebook2")
             if !window.setFrameUsingName(window.frameAutosaveName) { window.center() }
             mainWindow = window
-            // Don't start with the cursor in a search or text field; arrow keys should move through meetings.
-            DispatchQueue.main.async { window.makeFirstResponder(nil) }
+            if state.isDemo, let size = Self.demoSize { window.setContentSize(size); window.center() }
+            if state.isDemo, let tab = Self.demoArgument("--demo-tab").flatMap(MeetingTab.init(rawValue:)) { state.meetingTab = tab }
+            // Start in the meeting list, not a search or text field, so arrow keys move through meetings.
+            DispatchQueue.main.async { [weak self] in self?.focusSidebar(in: window) }
         }
         updateActivationPolicy(forceRegular: true)
         mainWindow?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
@@ -225,6 +227,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         window.center(); onboardingWindow = window
         updateActivationPolicy(forceRegular: true)
         window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func focusSidebar(in window: NSWindow) {
+        func list(in view: NSView) -> NSTableView? {
+            if let table = view as? NSTableView { return table }
+            for child in view.subviews { if let table = list(in: child) { return table } }
+            return nil
+        }
+        if let content = window.contentView, let table = list(in: content) { window.makeFirstResponder(table) }
+        else { window.makeFirstResponder(nil) }
+    }
+
+    private static func demoArgument(_ name: String) -> String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: name), arguments.indices.contains(index + 1) else { return nil }
+        return arguments[index + 1]
+    }
+
+    /// `--demo-size 1000x700` opens the preview notebook at that content size.
+    private static var demoSize: NSSize? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--demo-size"), arguments.indices.contains(index + 1) else { return nil }
+        let parts = arguments[index + 1].split(separator: "x").compactMap { Double($0) }
+        return parts.count == 2 ? NSSize(width: parts[0], height: parts[1]) : nil
     }
 
     /// A Dock icon and app switcher entry while a window is open; menu bar only otherwise.

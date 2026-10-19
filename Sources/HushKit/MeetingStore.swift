@@ -98,6 +98,7 @@ public actor MeetingStore {
         var result: [Meeting] = []
         var unreadable: [URL] = []
         for folder in folders {
+            Self.allowWritesWhileLocked(folder)
             let url = folder.appendingPathComponent("meeting.json")
             // A folder without meeting.json is an interrupted creation, not a damaged meeting.
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
@@ -112,6 +113,15 @@ public actor MeetingStore {
         return result.sorted { $0.startedAt > $1.startedAt }
     }
 
+    /// Files written before 2.0.1 used complete protection, which blocks reading and replacing them
+    /// while the screen is locked. Relax them to the class new files use. Failures are harmless.
+    static func allowWritesWhileLocked(_ folder: URL) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return }
+        for file in files {
+            try? fm.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: file.path)
+        }
+    }
     public func save(_ meeting: Meeting, transcript: Transcript? = nil, markdown: String? = nil) throws {
         guard !tombstones.contains(meeting.id) else { return }
         let dir = folder(meeting.id)
@@ -185,7 +195,7 @@ public actor MeetingStore {
         let bytes = try read(sealed)
         guard bytes.count > 44 else { return nil }
         let temporary = dir.appendingPathComponent(".processing-" + name)
-        try bytes.write(to: temporary, options: [.atomic, .completeFileProtection])
+        try bytes.write(to: temporary, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
         return temporary
     }
@@ -286,7 +296,9 @@ public actor MeetingStore {
             guard let sealed = try AES.GCM.seal(data, using: key).combined else { throw HushError.message("Couldn't encrypt this meeting.") }
             output = Self.marker + sealed
         } else { output = data }
-        try output.write(to: url, options: [.atomic, .completeFileProtection])
+        // Protected until the first unlock after boot. Complete protection would refuse writes while the
+        // screen is locked, so a recording or notes finishing on a locked Mac couldn't be saved.
+        try output.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
     /// Rewrites into a protected staging directory before replacing any original files.

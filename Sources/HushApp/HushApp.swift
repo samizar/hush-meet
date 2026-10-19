@@ -32,7 +32,7 @@ struct HushApp: App {
                         .disabled(delegate.state.selected == nil)
                     Button("Ask") { delegate.state.meetingTab = .ask }.keyboardShortcut("3")
                         .disabled(delegate.state.selected == nil)
-                    Button(delegate.state.inspectorShown ? "Hide Side Notes" : "Show Side Notes") { delegate.state.toggleInspector() }
+                    Button(delegate.state.sideNotesVisible ? "Hide Side Notes" : "Show Side Notes") { delegate.state.toggleSideNotes() }
                         .keyboardShortcut("i", modifiers: [.command, .option])
                 }
                 CommandMenu("Meeting") {

@@ -16,7 +16,7 @@ struct InspectorView: View {
                 actions
             }.padding(DesignTokens.inset)
         }
-        .background(DesignTokens.sidebar.opacity(0.5))
+        .background(DesignTokens.sidebar.opacity(0.5).ignoresSafeArea(edges: .top))
     }
 
     private var details: some View {

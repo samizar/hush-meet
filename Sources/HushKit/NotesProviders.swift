@@ -33,9 +33,49 @@ public struct AppleNotesProvider: NotesProvider {
         try await preflight()
         let schema = try GenerationSchema(root: Self.dynamic(HushNotesSchema.root), dependencies: [])
         let session = LanguageModelSession(instructions: system)
-        let result = try await session.respond(to: user, schema: schema,
-                                              options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 800))
-        return GenerationResult(notes: try GeneratedNotes.parse(result.content.jsonString))
+        do {
+            let result = try await session.respond(to: user, schema: schema,
+                                                  options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 800))
+            return GenerationResult(notes: try GeneratedNotes.parse(result.content.jsonString))
+        } catch let error as LanguageModelSession.GenerationError {
+            // The default safety filter sometimes rejects ordinary conversations. Summarizing what people
+            // said is a content transformation, which Apple's permissive guardrails are designed for.
+            if case .guardrailViolation = error { return try await summarizePermissively(system: system, user: user) }
+            throw Self.explain(error)
+        }
+    }
+
+    /// Permissive guardrails apply to text replies, so this pass asks for the same JSON as plain text.
+    func summarizePermissively(system: String, user: String) async throws -> GenerationResult {
+        let shape = String(decoding: HushNotesSchema.root.jsonSchema().data(), as: UTF8.self)
+        let session = LanguageModelSession(model: SystemLanguageModel(guardrails: .permissiveContentTransformations),
+                                           instructions: system + "\nReply with one JSON object and nothing else, matching this JSON schema: " + shape)
+        do {
+            let reply = try await session.respond(to: user, options: GenerationOptions(sampling: .greedy, maximumResponseTokens: 900))
+            return GenerationResult(notes: try GeneratedNotes.parse(reply.content))
+        } catch let error as LanguageModelSession.GenerationError {
+            throw Self.explain(error)
+        } catch is SummarizeError {
+            throw HushError.message("Apple's on-device model couldn't summarize part of this conversation. Your transcript is saved. Try again, or choose another notes model in Settings → AI Models.")
+        }
+    }
+
+    /// Plain-language versions of Apple's generation errors.
+    static func explain(_ error: LanguageModelSession.GenerationError) -> HushError {
+        switch error {
+        case .guardrailViolation, .refusal:
+            .message("Apple's on-device model declined to summarize this conversation. Your transcript is saved. Try again, or choose another notes model in Settings → AI Models.")
+        case .exceededContextWindowSize:
+            .message("Part of this meeting was too long for Apple's on-device model. Your transcript is saved; try again.")
+        case .unsupportedLanguageOrLocale:
+            .message("Apple's on-device model doesn't support this meeting's language yet. Your transcript is saved; choose another notes model in Settings → AI Models.")
+        case .assetsUnavailable:
+            .message("Apple's notes model isn't ready yet. Check that Apple Intelligence is on, then try again.")
+        case .rateLimited, .concurrentRequests:
+            .message("Apple's on-device model is busy. Try again in a moment.")
+        default:
+            .message("Apple's on-device model couldn't write these notes. Your transcript is saved; try again.")
+        }
     }
     /// A plain-text reply for Ask, from a fresh session that keeps no history.
     public func answer(system: String, user: String) async throws -> String {

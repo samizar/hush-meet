@@ -53,10 +53,9 @@ struct HomeView: View {
                     Text(state.capture.isRecording ? "You're recording" : "Start a recording").font(DesignTokens.heading)
                     Text(state.capture.isRecording ? "Hush is listening to both sides of the conversation." : "Hush listens to you and the call on separate tracks, then writes the notes.")
                         .font(DesignTokens.chrome).foregroundStyle(DesignTokens.soft).fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: DesignTokens.space) {
-                        LanguagePicker(locale: $state.preferences.locale, locales: state.locales).labelsHidden().fixedSize()
-                            .disabled(state.capture.isRecording)
-                        if state.preferences.globalShortcut { HStack(spacing: 4) { Text("From anywhere").foregroundStyle(DesignTokens.faint); KeyHint("⌃⌥⌘R") }.font(DesignTokens.small) }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: DesignTokens.space) { languageAndShortcut }
+                        VStack(alignment: .leading, spacing: 6) { languageAndShortcut }
                     }.padding(.top, 6)
                 }
                 Spacer()
@@ -72,6 +71,12 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder private var languageAndShortcut: some View {
+        LanguagePicker(locale: $state.preferences.locale, locales: state.locales).labelsHidden().fixedSize()
+            .disabled(state.capture.isRecording)
+        if state.preferences.globalShortcut { HStack(spacing: 4) { Text("From anywhere").foregroundStyle(DesignTokens.faint); KeyHint("⌃⌥⌘R") }.font(DesignTokens.small) }
     }
 
     private var upcoming: some View {

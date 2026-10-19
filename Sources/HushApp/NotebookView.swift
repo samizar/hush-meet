@@ -19,12 +19,6 @@ struct NotebookView: View {
                     BannerStack(state: state).frame(maxWidth: 520).padding(.top, DesignTokens.gap).padding(.horizontal, DesignTokens.inset)
                 }
         }
-        .inspector(isPresented: Binding(get: { state.inspectorShown && state.selected != nil && selection.count == 1 && !isLive },
-                                        set: { if !isLive { state.inspectorShown = $0 } })) {
-            if let meeting = state.selected {
-                InspectorView(state: state, meeting: meeting).inspectorColumnWidth(min: 240, ideal: DesignTokens.inspectorWidth, max: 400)
-            }
-        }
         .toolbar { toolbar }
         .toolbar(removing: .title)
         .background(DesignTokens.paper)
@@ -50,7 +44,7 @@ struct NotebookView: View {
             case .tasks: ActionItemsView(state: state)
             case .meeting:
                 if let meeting = state.selected {
-                    MeetingDetailView(state: state, meeting: meeting, tab: $state.meetingTab, editing: $state.editingNotes)
+                    MeetingWithSideNotes(state: state, meeting: meeting, live: isLive)
                 } else { HomeView(state: state) }
             }
         }
@@ -89,10 +83,53 @@ struct NotebookView: View {
         }
         if state.selected != nil && selection.count == 1 && !isLive {
             ToolbarItem {
-                Button { state.toggleInspector() } label: { Label("Side notes", systemImage: "sidebar.right") }
-                    .help(state.inspectorShown ? "Hide side notes (⌥⌘I)" : "Show side notes (⌥⌘I)")
+                Button { state.toggleSideNotes() } label: { Label("Side notes", systemImage: "sidebar.right") }
+                    .help(state.sideNotesVisible ? "Hide side notes (⌥⌘I)" : "Show side notes (⌥⌘I)")
             }
         }
+    }
+}
+
+/// The meeting page with side notes beside it in wide windows, or floating over it in narrow ones.
+/// Laid out here rather than with `.inspector`, which forces a large minimum window width and lets
+/// the whole notebook overflow when it appears in a narrower window.
+struct MeetingWithSideNotes: View {
+    @Bindable var state: AppState
+    let meeting: Meeting
+    let live: Bool
+    @State private var width: CGFloat = 0
+    private var docked: Bool { width >= DesignTokens.detailMinWidth + DesignTokens.inspectorWidth }
+    private var shown: Bool { !live && (docked ? state.inspectorShown : state.sideNotesFloating) }
+    var body: some View {
+        HStack(spacing: 0) {
+            MeetingDetailView(state: state, meeting: meeting, tab: $state.meetingTab, editing: $state.editingNotes)
+                .frame(maxWidth: .infinity)
+            if shown && docked {
+                Divider().ignoresSafeArea(edges: .top)
+                InspectorView(state: state, meeting: meeting)
+                    .frame(width: DesignTokens.inspectorWidth)
+                    .transition(.move(edge: .trailing))
+            }
+        }
+        .overlay(alignment: .trailing) {
+            if shown && !docked && width > 0 {
+                InspectorView(state: state, meeting: meeting)
+                    .frame(width: min(DesignTokens.inspectorWidth, width - 40))
+                    .background(DesignTokens.paper)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: DesignTokens.cardRadius, style: .continuous).strokeBorder(DesignTokens.hairline))
+                    .shadow(color: .black.opacity(0.18), radius: 18, x: -4)
+                    .padding(DesignTokens.gap)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(DesignTokens.spring, value: shown)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { new in
+            width = new
+            let fits = new >= DesignTokens.detailMinWidth + DesignTokens.inspectorWidth
+            if state.sideNotesDocked != fits { state.sideNotesDocked = fits; state.sideNotesFloating = false }
+        }
+        .onExitCommand { state.sideNotesFloating = false }
     }
 }
 
