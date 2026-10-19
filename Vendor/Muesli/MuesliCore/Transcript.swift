@@ -2,7 +2,8 @@ import Foundation
 
 /// Who said it. Muesli labels speakers by *channel*, not by voice: the
 /// microphone is you, system audio is everyone else on the call.
-public enum Speaker: String, Codable, Sendable, Hashable {
+public enum Speaker: String, Codable, Sendable, Hashable, Identifiable {
+    public var id: String { rawValue }
     case me
     case them
 

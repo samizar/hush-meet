@@ -1,6 +1,7 @@
 import Foundation
 import FoundationModels
 import MuesliCore
+import os
 
 public protocol NotesProvider: NotesGenerator {}
 
@@ -77,13 +78,27 @@ public struct CloudNotesProvider: NotesProvider {
         switch configuration.notes {
         case .apple, .ollama, .lmstudio: throw HushError.message("Choose a cloud notes provider first.")
         case .anthropic:
-            data = try await client.json(url: URL(string: "https://api.anthropic.com/v1/messages")!, body: [
-                "model": configuration.resolvedModel, "max_tokens": 3000, "system": system,
+            let model = configuration.resolvedModel
+            var body: [String: Any] = [
+                // Thinking tokens count toward max_tokens on current models; leave room for the JSON.
+                "model": model, "max_tokens": 16000, "system": system,
                 "messages": [["role": "user", "content": user]],
                 "output_config": ["format": ["type": "json_schema", "schema": schema]]
-            ], headers: ["x-api-key": try requiredKey(), "anthropic-version": "2023-06-01"])
+            ]
+            var headers = ["x-api-key": try requiredKey(), "anthropic-version": "2023-06-01"]
+            if Self.supportsServerFallback(model) {
+                // A declined request is retried server-side on Anthropic's recommended model.
+                body["fallbacks"] = "default"
+                headers["anthropic-beta"] = "server-side-fallback-2026-07-01"
+            }
+            data = try await client.json(url: URL(string: "https://api.anthropic.com/v1/messages")!, body: body, headers: headers)
             let json = try Self.object(data)
-            text = (json["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined() ?? ""
+            switch json["stop_reason"] as? String {
+            case "refusal": throw HushError.message("Anthropic declined to write notes for this meeting. Your transcript is saved; try another provider.")
+            case "max_tokens": throw HushError.message("Anthropic stopped before the notes were complete. Try again, or choose a shorter template.")
+            default: break
+            }
+            text = (json["content"] as? [[String: Any]])?.filter { ($0["type"] as? String) == "text" }.compactMap { $0["text"] as? String }.joined() ?? ""
         case .openai, .compatible:
             let base = configuration.notes == .openai ? URL(string: "https://api.openai.com/v1")! : URL(string: configuration.compatibleURL)!
             var headers: [String: String] = [:]
@@ -108,6 +123,10 @@ public struct CloudNotesProvider: NotesProvider {
         }
         do { return GenerationResult(notes: try GeneratedNotes.parse(text)) }
         catch { throw HushError.message("The provider returned incomplete notes. Your transcript is saved; try again.") }
+    }
+    /// Server-side refusal fallback exists for these models only; others reject the parameter.
+    static func supportsServerFallback(_ model: String) -> Bool {
+        ["claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-fable-5", "claude-sonnet-5-5"].contains(model)
     }
     static func object(_ data: Data) throws -> [String: Any] {
         guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw HushError.message("The provider response couldn't be read.") }
@@ -140,4 +159,41 @@ public enum HushNotesSchema {
         guard case .object(let name, let properties) = NotesSchema.root else { return NotesSchema.root }
         return .object(name: name, properties: properties.filter { !["events", "emailDrafts"].contains($0.name) })
     }()
+}
+
+/// Bounds every model request separately and reports each one as it starts. A long
+/// meeting needs many passes; one overall deadline used to cut them off midway.
+public struct PacedNotesGenerator: NotesGenerator {
+    public let base: any NotesGenerator
+    public let perRequest: Duration
+    private let onRequest: @Sendable (Int) -> Void
+    private let counter = RequestCounter()
+    public init(base: any NotesGenerator, perRequest: Duration, onRequest: @escaping @Sendable (Int) -> Void = { _ in }) {
+        self.base = base; self.perRequest = perRequest; self.onRequest = onRequest
+    }
+    public var displayName: String { base.displayName }
+    public var transcriptCharacterBudget: Int { get async { await base.transcriptCharacterBudget } }
+    public func preflight() async throws { try await base.preflight() }
+    public func generate(system: String, user: String) async throws -> GenerationResult {
+        try Task.checkCancellation()
+        onRequest(counter.next())
+        let base = self.base
+        do { return try await AsyncDeadline.run(for: perRequest) { try await base.generate(system: system, user: user) } }
+        catch is AsyncDeadline.TimedOut {
+            throw HushError.message("The notes model stopped responding. Your transcript is saved; try again, or choose another model in Settings → Models.")
+        }
+    }
+    /// Per-request limits that suit each kind of model.
+    public static func limit(for service: NotesService) -> Duration {
+        switch service {
+        case .apple: .seconds(90)
+        case .ollama, .lmstudio: .seconds(300)
+        default: .seconds(180)
+        }
+    }
+}
+
+final class RequestCounter: Sendable {
+    private let value = OSAllocatedUnfairLock(initialState: 0)
+    func next() -> Int { value.withLock { $0 += 1; return $0 } }
 }

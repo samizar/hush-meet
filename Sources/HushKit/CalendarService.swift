@@ -3,6 +3,7 @@ import EventKit
 import Observation
 import CoreAudio
 import MuesliAudio
+import MuesliCore
 
 public struct CalendarMeeting: Identifiable, Sendable, Equatable {
     public var id: String
@@ -10,9 +11,16 @@ public struct CalendarMeeting: Identifiable, Sendable, Equatable {
     public var start: Date
     public var end: Date
     public var joinURL: URL?
-    public init(id: String, title: String, start: Date, end: Date, joinURL: URL? = nil) {
+    /// Other invitees' names, without the person using Hush.
+    public var attendees: [String]
+    public var calendarName: String?
+    public init(id: String, title: String, start: Date, end: Date, joinURL: URL? = nil, attendees: [String] = [], calendarName: String? = nil) {
         self.id = id; self.title = title; self.start = start; self.end = end; self.joinURL = joinURL
+        self.attendees = attendees; self.calendarName = calendarName
     }
+    public var isHappeningNow: Bool { start <= .now && end > .now }
+    /// The meeting is about to start or already running, so recording it now makes sense.
+    public var isRecordableNow: Bool { start.timeIntervalSinceNow < 15 * 60 && end > .now }
 }
 
 @MainActor @Observable
@@ -28,6 +36,8 @@ public final class CalendarService {
         if hasAccess { refresh() }
         return hasAccess
     }
+    /// Sample events for preview mode. Never reads the real calendar.
+    public func preview(_ meetings: [CalendarMeeting]) { self.meetings = meetings; hasAccess = true }
     public func refresh() {
         hasAccess = EKEventStore.authorizationStatus(for: .event) == .fullAccess
         guard hasAccess else { meetings = []; return }
@@ -41,8 +51,30 @@ public final class CalendarService {
         }.map { event in
             CalendarMeeting(id: (event.eventIdentifier ?? event.calendarItemIdentifier) + ":" + String(Int(event.startDate.timeIntervalSince1970)),
                             title: event.title?.isEmpty == false ? event.title : "Meeting", start: event.startDate, end: event.endDate,
-                            joinURL: Self.videoURL(in: [event.url?.absoluteString, event.location, event.notes].compactMap { $0 }.joined(separator: "\n")))
+                            joinURL: Self.videoURL(in: [event.url?.absoluteString, event.location, event.notes].compactMap { $0 }.joined(separator: "\n")),
+                            attendees: (event.attendees ?? []).filter { !$0.isCurrentUser }.compactMap(Self.displayName),
+                            calendarName: event.calendar?.title)
         }.sorted { $0.start < $1.start }
+    }
+    /// Adds items to the default Reminders list. Asks for Reminders access the first time.
+    public func addReminders(_ items: [(title: String, notes: String, due: DateComponents?)]) async throws -> Int {
+        let granted = (try? await store.requestFullAccessToReminders()) ?? false
+        guard granted else { throw HushError.message("Allow Hush in System Settings → Privacy & Security → Reminders, then try again.") }
+        guard let list = store.defaultCalendarForNewReminders() else { throw HushError.message("Choose a default list in Reminders, then try again.") }
+        for item in items {
+            let reminder = EKReminder(eventStore: store)
+            reminder.title = item.title; reminder.notes = item.notes; reminder.calendar = list
+            reminder.dueDateComponents = item.due
+            try store.save(reminder, commit: false)
+        }
+        try store.commit()
+        return items.count
+    }
+    nonisolated static func displayName(_ participant: EKParticipant) -> String? {
+        if let name = participant.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty, !name.contains("@") { return name }
+        let address = participant.url.absoluteString.replacingOccurrences(of: "mailto:", with: "")
+        guard let local = address.split(separator: "@").first, !local.isEmpty else { return nil }
+        return local.split(whereSeparator: { $0 == "." || $0 == "_" }).map { $0.capitalized }.joined(separator: " ")
     }
     nonisolated public static func isMeeting(allDay: Bool, declined: Bool, attendeeCount: Int, hasVideoLink: Bool) -> Bool {
         !allDay && !declined && (attendeeCount > 0 || hasVideoLink)

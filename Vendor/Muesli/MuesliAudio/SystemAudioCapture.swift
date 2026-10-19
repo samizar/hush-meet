@@ -67,6 +67,7 @@ public final class SystemAudioCapture: @unchecked Sendable {
     private var followed: [AudioObjectID] = []
     private var lastReported: Update?
     private var listener: AudioObjectPropertyListenerBlock?
+    private var outputListener: AudioObjectPropertyListenerBlock?
 
     public init(scope: Scope = .everything) {
         self.scope = scope
@@ -79,6 +80,7 @@ public final class SystemAudioCapture: @unchecked Sendable {
             do {
                 try refresh()
                 if scope != .everything { installListener() }
+                installOutputListener()
             } catch {
                 teardown()
                 self.continuation = nil
@@ -92,6 +94,7 @@ public final class SystemAudioCapture: @unchecked Sendable {
     public func stop() {
         control.sync {
             removeListener()
+            removeOutputListener()
             teardown()
             continuation?.finish()
             continuation = nil
@@ -154,6 +157,31 @@ public final class SystemAudioCapture: @unchecked Sendable {
         }
         listener = block
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, control, block)
+    }
+
+    /// Hush: headphones or a new speaker change the default output device mid-call. The
+    /// aggregate device is clocked by the old device, so rebuild the tap on the new one.
+    private func installOutputListener() {
+        var address = Self.defaultOutputAddress
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self, self.continuation != nil, self.tap != nil else { return }
+            self.teardown()
+            do { try self.refresh() } catch { self.report(.failed(error.localizedDescription)) }
+        }
+        outputListener = block
+        AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, control, block)
+    }
+
+    private func removeOutputListener() {
+        guard let block = outputListener else { return }
+        var address = Self.defaultOutputAddress
+        AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, control, block)
+        outputListener = nil
+    }
+
+    private static var defaultOutputAddress: AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,
+                                   mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
     }
 
     private func removeListener() {

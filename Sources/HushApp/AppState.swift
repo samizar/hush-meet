@@ -9,90 +9,194 @@ import MuesliCore
 import MuesliAudio
 import MuesliTranscribe
 
+/// Where the notebook window is pointed.
+enum Route: Hashable {
+    case home
+    case tasks
+    case meeting(UUID)
+}
+
+/// A short, non-blocking message at the top of the notebook or popover.
+struct Banner: Identifiable {
+    enum Kind { case info, success, warning, error }
+    let id = UUID()
+    var kind: Kind
+    var title: String
+    var detail: String?
+    var actionTitle: String?
+    var action: (@MainActor () -> Void)?
+    var sticky: Bool { kind == .error || kind == .warning }
+}
+
+/// What the processing queue is doing for one meeting.
+struct ProcessingProgress: Equatable {
+    enum Phase: Equatable {
+        case waiting
+        case transcribing(Double?)
+        case writing(part: Int, of: Int)
+    }
+    var phase: Phase
+    var title: String {
+        switch phase {
+        case .waiting: "Waiting to start…"
+        case .transcribing: "Finishing the transcript…"
+        case .writing(let part, let total):
+            total <= 1 ? "Writing notes…" : part <= total ? "Reading part \(part) of \(total)…" : "Bringing it together…"
+        }
+    }
+    var fraction: Double? {
+        switch phase {
+        case .waiting: nil
+        case .transcribing(let value): value.map { $0 * 0.5 }
+        case .writing(let part, let total): total <= 1 ? nil : 0.5 + 0.5 * min(0.95, Double(part) / Double(total + 1))
+        }
+    }
+}
+
 @MainActor @Observable
 final class AppState {
-    var preferences = Preferences.load() { didSet { if !isDemo { preferences.save() } } }
+    var preferences = Preferences.load() { didSet { if !isDemo, preferences != oldValue { preferences.save() } } }
     var meetings: [Meeting] = []
-    var selectedID: UUID?
+    var route: Route = .home
     var search = ""
-    var searchIDs: Set<UUID>?
+    var searchHits: [SearchHit]?
     var templates: [NoteTemplate] = []
     var markdown = ""
     var displayedTranscript: Transcript?
-    var transcriptExpanded = false
-    var notice: String?
-    var busy = false
+    var banners: [Banner] = []
+    var tasks: [NoteTask] = []
     var updater: AppUpdater?
     var currentID: UUID?
     var elapsed: TimeInterval = 0
     var liveNotes = ""
-    var sideNotesSaving = Set<UUID>()
-    var sideNotesSaveErrors: [UUID: String] = [:]
     var activeEvent: CalendarMeeting?
     var storageSize: Int64 = 0
     var storageURL = MeetingStore.defaultRoot
     var locales: [Locale] = []
+    var damagedFolders: [URL] = []
     var autoOverrides: [String: Bool] = [:] {
         didSet { if !isDemo { UserDefaults.standard.set(autoOverrides, forKey: "hush.autoOverrides") } }
     }
+    // Processing queue. Recording never waits for it.
+    var queue: [UUID] = []
+    var activeJob: UUID?
+    var progress: [UUID: ProcessingProgress] = [:]
+    /// Storage moves, encryption and delete-all pause everything else.
+    var maintenance = false
+    var isStarting = false
+    var isStopping = false
+    // Notebook view state, shared with the menu commands.
+    var meetingTab = MeetingTab(rawValue: UserDefaults.standard.string(forKey: "hush.meetingTab") ?? "") ?? .notes {
+        didSet { if !isDemo { UserDefaults.standard.set(meetingTab.rawValue, forKey: "hush.meetingTab") } }
+    }
+    var editingNotes = false
+    /// Whether side notes show. Only the person's own choice is remembered, not a collapse
+    /// the window makes when it's too narrow.
+    var inspectorShown = UserDefaults.standard.object(forKey: "hush.sideNotesVisible") as? Bool ?? true
+    func toggleInspector() {
+        inspectorShown.toggle()
+        if !isDemo { UserDefaults.standard.set(inspectorShown, forKey: "hush.sideNotesVisible") }
+    }
+    // Autosave.
+    var savingIDs = Set<UUID>()
+    var saveErrors: [UUID: String] = [:]
+
     let capture = CaptureSession()
     let calendar = CalendarService()
     let isDemo: Bool
     @ObservationIgnored var store: MeetingStore?
     @ObservationIgnored var showMain: (() -> Void)?
-    @ObservationIgnored var showSettings: (() -> Void)?
+    @ObservationIgnored var showSettings: ((SettingsTab?) -> Void)?
     @ObservationIgnored var showCard: ((CalendarMeeting?, String?) -> Void)?
     @ObservationIgnored var dismissCard: (() -> Void)?
     @ObservationIgnored var recordingChanged: ((Bool) -> Void)?
-    @ObservationIgnored private var timer: Timer?
-    @ObservationIgnored private var tickCount = 0
-    @ObservationIgnored private var reminded = Set<String>()
-    @ObservationIgnored private var skipped = Set<String>()
-    @ObservationIgnored private var autoStarted = Set<String>()
-    @ObservationIgnored private var micReleasedAt: Date?
-    @ObservationIgnored private var hadCall = false
-    @ObservationIgnored private var detectedCall = false
-    @ObservationIgnored private var checkpointing = false
-    @ObservationIgnored private var selectionTask: Task<Void, Never>?
-    @ObservationIgnored private var searchTask: Task<Void, Never>?
-    @ObservationIgnored private var scopedURL: URL?
-    @ObservationIgnored private var processingTask: Task<Void, Never>?
-    @ObservationIgnored private var sideNoteWrites: [UUID: Task<Void, Never>] = [:]
-    @ObservationIgnored private var sideNoteRevisions: [UUID: UUID] = [:]
-    var canCancelProcessing: Bool { processingTask != nil && busy && !capture.isRecording }
-    var selected: Meeting? { meetings.first { $0.id == selectedID } }
+    @ObservationIgnored var timer: Timer?
+    @ObservationIgnored var tickCount = 0
+    @ObservationIgnored var reminded = Set<String>()
+    @ObservationIgnored var skipped = Set<String>()
+    @ObservationIgnored var autoStarted = Set<String>()
+    @ObservationIgnored var micReleasedAt: Date?
+    @ObservationIgnored var hadCall = false
+    @ObservationIgnored var detectedCall = false
+    @ObservationIgnored var checkpointing = false
+    @ObservationIgnored var selectionTask: Task<Void, Never>?
+    @ObservationIgnored var searchTask: Task<Void, Never>?
+    @ObservationIgnored var scopedURL: URL?
+    @ObservationIgnored var processingTask: Task<Void, Never>?
+    @ObservationIgnored var writers: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored var dirty = Set<UUID>()
+    /// Notes for `--demo` meetings, kept in memory only.
+    @ObservationIgnored var demoMarkdown: [UUID: String] = [:]
+    /// The providers each queued meeting was confirmed with. Later settings changes don't apply to it.
+    @ObservationIgnored var jobProviders: [UUID: ProviderConfiguration] = [:]
+    @ObservationIgnored var recordingActivity: NSObjectProtocol?
+    @ObservationIgnored var processingActivity: NSObjectProtocol?
+
+    // MARK: Derived state
+
+    var selectedID: UUID? {
+        get { if case .meeting(let id) = route { id } else { nil } }
+        set { route = newValue.map(Route.meeting) ?? .home }
+    }
+    var selected: Meeting? { selectedID.flatMap { id in meetings.first { $0.id == id } } }
     var current: Meeting? { meetings.first { $0.id == currentID } }
-    var filteredMeetings: [Meeting] { searchIDs.map { ids in meetings.filter { ids.contains($0.id) } } ?? meetings }
-    var canRecord: Bool { !busy && !capture.isRecording && !capture.isPreparing && store != nil }
-    var hasActiveMeetingWork: Bool { busy || capture.isRecording || capture.isPreparing }
-    var preventsUpdateRestart: Bool { hasActiveMeetingWork || !sideNotesSaving.isEmpty || !sideNotesSaveErrors.isEmpty }
+    var filteredMeetings: [Meeting] {
+        guard let searchHits else { return meetings }
+        let byID = Dictionary(uniqueKeysWithValues: meetings.map { ($0.id, $0) })
+        return searchHits.compactMap { byID[$0.id] }
+    }
+    func snippet(for id: UUID) -> String? { searchHits?.first { $0.id == id }?.snippet }
+    var isRecording: Bool { capture.isRecording }
+    var canRecord: Bool { !capture.isRecording && !capture.isPreparing && !isStarting && !isStopping && !maintenance && (store != nil || isDemo) }
+    /// Any queued or running note work. Recording is separate.
+    var busy: Bool { activeJob != nil || !queue.isEmpty || maintenance }
+    var canCancelProcessing: Bool { activeJob != nil && processingTask != nil }
+    var hasActiveMeetingWork: Bool { busy || capture.isRecording || capture.isPreparing || isStarting || isStopping }
+    var preventsUpdateRestart: Bool { hasActiveMeetingWork || !savingIDs.isEmpty || !saveErrors.isEmpty }
+    func isQueued(_ id: UUID) -> Bool { activeJob == id || queue.contains(id) }
+    var openTasks: [NoteTask] { tasks.filter { !$0.done } }
+    var nextMeeting: CalendarMeeting? {
+        guard preferences.calendarEnabled else { return nil }
+        return calendar.meetings.first { $0.end > .now && !skipped.contains($0.id) }
+    }
+    // Names kept for the side-notes autosave API.
+    var sideNotesSaving: Set<UUID> { savingIDs }
+    var sideNotesSaveErrors: [UUID: String] { saveErrors }
+
     init(preview: Bool = ProcessInfo.processInfo.arguments.contains("--demo")) {
         isDemo = preview
         if isDemo { seedDemo() }
         else { autoOverrides = UserDefaults.standard.dictionary(forKey: "hush.autoOverrides") as? [String: Bool] ?? [:] }
     }
+
+    // MARK: Loading
+
     func load() async {
         if isDemo { return }
         do {
             if let bookmark = preferences.storageBookmark {
                 var stale = false
                 let url = try URL(resolvingBookmarkData: bookmark, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale)
-                guard url.startAccessingSecurityScopedResource() else { throw HushError.message("Hush can't access the selected storage folder. Choose it again in Settings.") }
+                guard url.startAccessingSecurityScopedResource() else { throw HushError.message("Hush can't access the selected storage folder. Choose it again in Settings → Storage.") }
                 scopedURL = url; storageURL = url
                 if stale { preferences.storageBookmark = try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) }
             }
             store = try MeetingStore(root: storageURL, encrypted: preferences.encrypted)
-            templates = try Templates.load()
+            templates = (try? Templates.load()) ?? []
             guard let store else { return }
             meetings = try await store.list()
-            for i in meetings.indices where [.recording, .transcribing, .writing].contains(meetings[i].state) {
-                meetings[i].state = .failed
-                meetings[i].endedAt = meetings[i].endedAt ?? meetings[i].startedAt
-                meetings[i].failure = "Hush closed before this meeting finished. Retry to recover its saved transcript or audio."
-                try await store.save(meetings[i])
+            damagedFolders = await store.damaged
+            if !damagedFolders.isEmpty {
+                DiagnosticLog.shared.record(.storeDamaged, count: damagedFolders.count)
+                let folders = damagedFolders
+                show(.warning, damagedFolders.count == 1 ? "One meeting couldn't be opened" : "\(damagedFolders.count) meetings couldn't be opened",
+                     detail: "Its files are kept. Everything else is here.", action: "Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting(folders)
+                }
             }
+            await recoverInterrupted()
             storageSize = await store.size()
-            if let first = meetings.first { select(first.id) }
+            await refreshTasks()
             if preferences.calendarEnabled { calendar.refresh() }
             locales = await SpeechTranscriber.supportedLocales.sorted { $0.identifier < $1.identifier }
             timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -100,10 +204,15 @@ final class AppState {
             }
             timer?.tolerance = 0.25
             if preferences.calendarEnabled { scheduleNotifications() }
-        } catch { notice = error.localizedDescription }
+        } catch { show(.error, "Hush couldn't open your notebook", detail: error.localizedDescription) }
     }
+
+    // MARK: Navigation and search
+
     func select(_ id: UUID) {
-        selectedID = id; transcriptExpanded = false; markdown = ""; displayedTranscript = nil
+        let changed = selectedID != id
+        route = .meeting(id)
+        if changed { markdown = ""; displayedTranscript = nil }
         selectionTask?.cancel()
         guard !isDemo else { loadDemo(id); return }
         selectionTask = Task {
@@ -114,94 +223,74 @@ final class AppState {
             markdown = notes ?? ""; displayedTranscript = transcript
         }
     }
+    func go(_ route: Route) {
+        if case .meeting(let id) = route { select(id) } else { self.route = route }
+    }
     func searchChanged() {
         searchTask?.cancel()
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        if query.isEmpty { searchIDs = nil; return }
+        if query.isEmpty { searchHits = nil; return }
         searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(150))
+            try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
             if isDemo {
-                searchIDs = Set(meetings.filter { ($0.title + ($0.structuredNotes?.summary ?? "") + $0.userNotes).localizedCaseInsensitiveContains(query) }.map(\.id))
+                searchHits = meetings.filter { ($0.title + ($0.structuredNotes?.summary ?? "") + $0.userNotes).localizedCaseInsensitiveContains(query) }
+                    .map { SearchHit(id: $0.id, snippet: $0.preview ?? "") }
             } else {
                 do {
-                    let result = try await store?.search(query) ?? []
-                    guard !Task.isCancelled else { return }; searchIDs = result
-                } catch { notice = error.localizedDescription }
+                    let result = try await store?.searchHits(query) ?? []
+                    guard !Task.isCancelled else { return }; searchHits = result
+                } catch { show(.error, "Search couldn't run", detail: error.localizedDescription) }
             }
         }
     }
-    func start(event: CalendarMeeting? = nil, automatic: Bool = false) {
-        guard canRecord else { return }
-        if isDemo { notice = "Preview mode. Open Hush normally to record a meeting."; return }
-        if automatic && (!preferences.recordingConsent || preferences.providers.leavesMac) { showCard?(event, nil); return }
-        if !preferences.recordingConsent {
-            let alert = NSAlert(); alert.messageText = "Before you record"
-            alert.informativeText = "Recording others may require their consent. Let everyone know before you start. Headphones help keep the two sides clear."
-            alert.addButton(withTitle: "I understand"); alert.addButton(withTitle: "Cancel")
-            NSApp.activate(ignoringOtherApps: true)
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            preferences.recordingConsent = true
+
+    // MARK: Banners
+
+    func show(_ kind: Banner.Kind, _ title: String, detail: String? = nil, action: String? = nil, perform: (@MainActor () -> Void)? = nil) {
+        banners.removeAll { $0.title == title }
+        let banner = Banner(kind: kind, title: title, detail: detail, actionTitle: action, action: perform)
+        banners.append(banner)
+        if banners.count > 3 { banners.removeFirst(banners.count - 3) }
+        guard !banner.sticky else { return }
+        Task { [id = banner.id] in
+            try? await Task.sleep(for: .seconds(5))
+            dismiss(id)
         }
-        if preferences.providers.leavesMac {
-            let alert = NSAlert(); alert.messageText = "This meeting uses a provider"
-            alert.informativeText = preferences.providers.dataFlow + " Continue with these settings?"
-            alert.addButton(withTitle: "Record"); alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
-        dismissCard?(); notice = nil; busy = true
-        Task {
-            guard let store else { busy = false; return }
-            var meeting = Meeting(title: event?.title ?? "Untitled meeting", locale: preferences.locale)
-            meeting.calendarEventID = event?.id
-            do {
-                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
-                try await store.save(meeting)
-                let folder = await store.folder(meeting.id)
-                try await capture.start(meeting: meeting, preferences: preferences, folder: folder)
-                meeting.startedAt = capture.startedAt ?? .now
-                try await store.save(meeting)
-                meetings.insert(meeting, at: 0); currentID = meeting.id; selectedID = meeting.id
-                activeEvent = event; liveNotes = ""; elapsed = 0; busy = false
-                hadCall = CallDetector.microphoneInUse(terms: preferences.captureApps); micReleasedAt = nil
-                recordingChanged?(true)
-                if preferences.copyConsent { copy("I'm taking notes with Hush.") }
-            } catch {
-                if capture.isRecording { _ = try? await capture.stop() }
-                meeting.state = .failed; meeting.endedAt = .now; meeting.failure = error.localizedDescription
-                try? await store.save(meeting)
-                meetings = (try? await store.list()) ?? meetings
-                notice = error.localizedDescription; busy = false
+    }
+    func dismiss(_ id: UUID) { withAnimation(DesignTokens.fade) { banners.removeAll { $0.id == id } } }
+
+    // MARK: Autosave
+
+    func update(_ id: UUID, _ body: (inout Meeting) -> Void) {
+        guard let index = meetings.firstIndex(where: { $0.id == id }) else { return }; body(&meetings[index])
+    }
+    /// Saves the latest in-memory copy of a meeting. Rapid changes coalesce into one write,
+    /// and writes for one meeting never overlap.
+    func persist(_ id: UUID) {
+        guard !isDemo, store != nil else { return }
+        dirty.insert(id); savingIDs.insert(id)
+        guard writers[id] == nil else { return }
+        writers[id] = Task {
+            while dirty.contains(id) {
+                dirty.remove(id)
+                guard let store, let meeting = meetings.first(where: { $0.id == id }) else { break }
+                do { try await store.save(meeting); saveErrors[id] = nil }
+                catch { saveErrors[id] = "Changes couldn't be saved. Check available disk space, then try again." }
             }
+            writers[id] = nil; savingIDs.remove(id)
         }
     }
-    func stop() {
-        guard capture.isRecording, let id = currentID, let store else { return }
-        busy = true; recordingChanged?(false)
-        update(id) { $0.endedAt = .now; $0.userNotes = liveNotes; $0.state = .transcribing }
-        processingTask = Task {
-            defer { currentID = nil; activeEvent = nil; busy = false; processingTask = nil }
-            do {
-                guard let snapshot = meetings.first(where: { $0.id == id }) else { throw HushError.message("This meeting couldn't be found.") }
-                var transcript = try await capture.stop()
-                guard await flushSideNotes() else { throw HushError.message("Save your side notes before updating the AI notes.") }
-                update(id) { $0.audioOffsets = capture.audioOffsets }
-                if preferences.providers.transcription != .apple {
-                    var aligned = snapshot; aligned.audioOffsets = capture.audioOffsets
-                    transcript = try await transcribeFiles(id: id, meeting: aligned)
-                }
-                try await finishTranscription(id: id, transcript: transcript)
-                try await generate(id)
-            } catch { await fail(id, error) }
-            storageSize = await store.size()
-        }
+    @discardableResult func flushWrites() async -> Bool {
+        while !writers.isEmpty { for task in Array(writers.values) { await task.value } }
+        return saveErrors.isEmpty
     }
-    func cancelProcessing() {
-        guard canCancelProcessing else { return }
-        processingTask?.cancel()
-    }
+    @discardableResult func flushSideNotes() async -> Bool { await flushWrites() }
+
+    // MARK: Editing
+
     func setSideNotes(_ id: UUID, text: String? = nil, includeInContext: Bool? = nil) {
-        guard !busy, let old = meetings.first(where: { $0.id == id }) else { return }
+        guard let old = meetings.first(where: { $0.id == id }) else { return }
         update(id) {
             if $0.notesContextDigest == nil, $0.structuredNotes != nil { $0.notesContextDigest = $0.contextDigest }
             if let text { $0.userNotes = text }
@@ -209,303 +298,93 @@ final class AppState {
         }
         guard let meeting = meetings.first(where: { $0.id == id }) else { return }
         if currentID == id { liveNotes = meeting.userNotes }
-        guard !isDemo, let store else { return }
-        if old.userNotes == meeting.userNotes && old.includesSideNotes == meeting.includesSideNotes && sideNotesSaveErrors[id] == nil { return }
-        let previous = sideNoteWrites[id], revision = UUID()
-        sideNoteRevisions[id] = revision; sideNotesSaving.insert(id); sideNotesSaveErrors[id] = nil
-        sideNoteWrites[id] = Task {
-            await previous?.value
-            do {
-                try await store.saveSideNotes(id, text: meeting.userNotes, includeInContext: meeting.includesSideNotes)
-                if sideNoteRevisions[id] == revision { sideNotesSaveErrors[id] = nil }
-            } catch {
-                if sideNoteRevisions[id] == revision { sideNotesSaveErrors[id] = "Side notes couldn't be saved. Check available disk space, then try again." }
-            }
-            if sideNoteRevisions[id] == revision { sideNoteWrites[id] = nil; sideNotesSaving.remove(id) }
-        }
-    }
-    @discardableResult func flushSideNotes() async -> Bool {
-        while !sideNoteWrites.isEmpty { for task in Array(sideNoteWrites.values) { await task.value } }
-        return sideNotesSaveErrors.isEmpty
-    }
-    private func transcribeFiles(id: UUID, meeting: Meeting) async throws -> Transcript {
-        guard let store else { throw HushError.message("The meeting store isn't ready.") }
-        var transcript = Transcript(startedAt: meeting.startedAt, locale: meeting.locale)
-        for speaker in [Speaker.me, .them] {
-            try Task.checkCancellation()
-            let offset = meeting.audioOffsets?[speaker.rawValue] ?? 0
-            guard let bytes = try await store.audioData(id, name: speaker.rawValue + ".wav"), bytes.count > 44 else { continue }
-            let temporary = await store.folder(id).appendingPathComponent(".retry-" + speaker.rawValue + ".wav")
-            try bytes.write(to: temporary, options: [.atomic, .completeFileProtection])
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
-            defer { try? FileManager.default.removeItem(at: temporary) }
-            if preferences.providers.transcription == .apple {
-                let locale = try await StreamTranscriber.prepare(locale: Locale(identifier: meeting.locale))
-                let segments = try await AsyncDeadline.run(for: .seconds(max(60, meeting.duration * 2))) {
-                    var result: [TranscriptSegment] = []
-                    for try await segment in StreamTranscriber(speaker: speaker, locale: locale).transcribe(try AudioFileSource.chunks(url: temporary)) { result.append(segment) }
-                    return result
-                }
-                for segment in segments {
-                    var aligned = segment; aligned.start += offset; aligned.end += offset; transcript.append(aligned)
-                }
-            } else {
-                let provider = CloudTranscriptionProvider(service: preferences.providers.transcription)
-                for try await (wav, start, duration) in try WaveAudio.chunks(file: temporary) {
-                    if wav.dropFirst(44).allSatisfy({ $0 == 0 }) { continue }
-                    let text = try await provider.transcribe(wav: wav, locale: meeting.locale)
-                    transcript.append(TranscriptSegment(speaker: speaker, start: start + offset, end: start + duration + offset, text: text))
-                }
-            }
-        }
-        return transcript
-    }
-    private func finishTranscription(id: UUID, transcript: Transcript) async throws {
-        try Task.checkCancellation()
-        guard let store else { return }
-        update(id) { $0.transcriptionFinal = true; $0.state = .writing; $0.failure = nil }
-        if let meeting = meetings.first(where: { $0.id == id }) { try await store.save(meeting, transcript: transcript) }
-        if preferences.deleteAudio { try await store.deleteAudio(id) }
-        else { try await store.protectAudio(id) }
-        if selectedID == id { displayedTranscript = transcript }
-    }
-    func retry(_ id: UUID) {
-        guard !busy, !capture.isRecording else { return }
-        if preferences.providers.leavesMac {
-            let alert = NSAlert(); alert.messageText = "Use the selected providers?"; alert.informativeText = preferences.providers.dataFlow
-            alert.addButton(withTitle: "Continue"); alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
-        busy = true
-        DiagnosticLog.shared.record(.retryStarted)
-        processingTask = Task {
-            defer { busy = false; processingTask = nil }
-            do {
-                guard await flushSideNotes() else { throw HushError.message("Save your side notes before updating the AI notes.") }
-                guard let meeting = meetings.first(where: { $0.id == id }) else { return }
-                if !meeting.transcriptionFinal {
-                    update(id) { $0.state = .transcribing }
-                    let transcript = try await transcribeFiles(id: id, meeting: meeting)
-                    try await finishTranscription(id: id, transcript: transcript)
-                }
-                try await generate(id)
-            } catch { await fail(id, error) }
-        }
-    }
-    func changeTemplate(_ templateID: String, for id: UUID) {
-        guard !busy && !capture.isRecording else { return }
-        update(id) { $0.templateID = templateID }
-        if isDemo, let notes = selected?.structuredNotes, let template = templates.first(where: { $0.id == templateID }) { markdown = template.render(notes); return }
-        retry(id)
-    }
-    private func generate(_ id: UUID) async throws {
-        guard let store, var meeting = meetings.first(where: { $0.id == id }) else { return }
-        let transcript = try await store.transcript(id)
-        guard !transcript.segments.isEmpty else { throw HushError.message("No speech was transcribed. Check microphone and system audio permissions, then try a new recording.") }
-        meeting.state = .writing; update(id) { $0.state = .writing }
-        try await store.save(meeting)
-        templates = try Templates.load()
-        guard let template = templates.first(where: { $0.id == meeting.templateID }) ?? templates.first else { throw HushError.message("No note template is available.") }
-        let provider = NotesProviders.make(preferences.providers)
-        let context = meeting.summaryContext
-        let limit: Duration = preferences.providers.notes.isLocalServer ? .seconds(300) : .seconds(120)
-        DiagnosticLog.shared.record(.notesStarted)
-        let result = try await AsyncDeadline.run(for: limit) {
-            try await provider.preflight()
-            return try await MeetingSummarizer(generator: TemplateNotesProvider(base: provider, instruction: template.instruction), enforceMergeBudget: true).summarize(transcript, context: context)
-        }
-        try Task.checkCancellation()
-        DiagnosticLog.shared.record(.notesFinished)
-        meeting.structuredNotes = result.notes; meeting.title = result.notes.title
-        meeting.notesContextDigest = meeting.contextDigest
-        meeting.state = .ready; meeting.failure = nil
-        let text = template.render(result.notes)
-        try await store.save(meeting, markdown: text)
-        update(id) { $0 = meeting }
-        if selectedID == id { markdown = text; displayedTranscript = transcript }
-        notify(title: "Notes ready", body: "Your meeting notes are waiting in Hush.", id: id.uuidString)
-    }
-    private func fail(_ id: UUID, _ error: Error) async {
-        DiagnosticLog.shared.record(error is CancellationError ? .processingCancelled : .processingFailed, error: error)
-        let message = error is CancellationError ? "Processing cancelled. Your saved recording and transcript have been kept. Retry when you're ready." : error.localizedDescription
-        update(id) { $0.state = .failed; $0.failure = message }
-        if let meeting = meetings.first(where: { $0.id == id }) {
-            try? await store?.save(meeting, transcript: !meeting.transcriptionFinal && capture.transcript?.startedAt == meeting.startedAt ? capture.transcript : nil)
-            try? await store?.protectAudio(id)
-        }
-        notice = message
-    }
-    func update(_ id: UUID, _ body: (inout Meeting) -> Void) {
-        guard let index = meetings.firstIndex(where: { $0.id == id }) else { return }; body(&meetings[index])
+        if old.userNotes == meeting.userNotes && old.includesSideNotes == meeting.includesSideNotes && saveErrors[id] == nil { return }
+        persist(id)
     }
     func rename(_ id: UUID, title: String) {
         let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
         update(id) { $0.title = String(clean.prefix(200)) }
-        if let meeting = meetings.first(where: { $0.id == id }) { Task { try? await store?.save(meeting) } }
+        persist(id)
     }
-    func delete(_ id: UUID) {
-        guard !busy && !capture.isRecording else { return }
-        let alert = NSAlert(); alert.messageText = "Delete this meeting?"; alert.informativeText = "Its notes, transcript, and saved audio will be deleted from this Mac."
-        alert.addButton(withTitle: "Delete"); alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+    func renameSpeaker(_ id: UUID, speaker: Speaker, to name: String) {
+        update(id) {
+            var names = $0.speakerNames ?? [:]
+            let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            names[speaker.rawValue] = clean.isEmpty || clean == speaker.label ? nil : String(clean.prefix(60))
+            $0.speakerNames = names.isEmpty ? nil : names
+        }
+        persist(id)
+    }
+    /// Saves notes the person edited by hand. Regenerating will ask before replacing them.
+    func saveEditedNotes(_ id: UUID, markdown text: String) {
+        guard text != markdown || selectedID != id else { return }
+        update(id) { $0.notesEdited = true }
+        if selectedID == id { markdown = text }
+        if isDemo { demoMarkdown[id] = text; tasks = demoTasks(); return }
+        guard let store, let meeting = meetings.first(where: { $0.id == id }) else { return }
         Task {
-            do {
-                if !isDemo { try await store?.delete(id) }
-                meetings.removeAll { $0.id == id }
-                sideNotesSaveErrors[id] = nil
-                selectedID = nil; markdown = ""; displayedTranscript = nil
-                if let next = meetings.first { select(next.id) }
-                storageSize = await store?.size() ?? 0
-            } catch { notice = error.localizedDescription }
+            do { try await store.save(meeting, markdown: text); await refreshTasks() }
+            catch { show(.error, "Your edits couldn't be saved", detail: error.localizedDescription) }
         }
     }
-    func deleteAll() {
-        guard !busy && !capture.isRecording else { return }
-        let alert = NSAlert(); alert.messageText = "Delete all meetings?"; alert.informativeText = "This permanently deletes every meeting, transcript, note, and audio recording in Hush."
-        alert.alertStyle = .warning; alert.addButton(withTitle: "Delete all meetings"); alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+    func toggleTask(_ task: NoteTask) {
         Task {
-            do {
-                if !isDemo { try await store?.deleteAll() }
-                meetings = []; selectedID = nil; markdown = ""; displayedTranscript = nil; storageSize = 0
-                sideNotesSaveErrors = [:]
-            } catch { notice = error.localizedDescription }
-        }
-    }
-    func setEncryption(_ enabled: Bool) {
-        guard !busy && !capture.isRecording else { return }
-        busy = true
-        Task {
-            do {
-                guard await flushSideNotes() else { throw HushError.message("Save your side notes before changing encryption.") }
-                try await store?.setEncryption(enabled); preferences.encrypted = enabled
+            let source: String
+            if selectedID == task.meetingID { source = markdown }
+            else if isDemo { source = demoMarkdown[task.meetingID] ?? "" }
+            else { guard let text = try? await store?.markdown(task.meetingID) else { return }; source = text }
+            guard let toggled = NotesMarkdown.toggling(source, line: task.line, expecting: task.text) else {
+                show(.info, "These notes changed. Try again."); await refreshTasks(); return
             }
-            catch { notice = error.localizedDescription }
-            busy = false
+            if selectedID == task.meetingID { markdown = toggled }
+            if isDemo { demoMarkdown[task.meetingID] = toggled; tasks = demoTasks(); return }
+            guard let store, let meeting = meetings.first(where: { $0.id == task.meetingID }) else { return }
+            do { try await store.save(meeting, markdown: toggled) }
+            catch { show(.error, "Couldn't update that item", detail: error.localizedDescription) }
+            await refreshTasks()
         }
     }
-    func chooseStorage() {
-        guard !busy && !capture.isRecording else { return }
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
-        panel.message = "Choose the folder Hush should use for new and existing meetings. Your current files will be moved into it."
-        guard panel.runModal() == .OK, let url = panel.url, url.standardizedFileURL != storageURL.standardizedFileURL else { return }
-        let access = url.startAccessingSecurityScopedResource()
-        busy = true
-        Task {
-            do {
-                guard await flushSideNotes() else { throw HushError.message("Save your side notes before moving storage.") }
-                guard !url.resolvingSymlinksInPath().path.hasPrefix(storageURL.resolvingSymlinksInPath().path + "/") else {
-                    throw HushError.message("Choose a folder outside the current meeting store.")
-                }
-                let existing = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
-                guard existing.isEmpty else { throw HushError.message("Choose an empty folder for your meetings.") }
-                let bookmark = try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
-                let originals = try FileManager.default.contentsOfDirectory(at: storageURL, includingPropertiesForKeys: nil).filter { UUID(uuidString: $0.lastPathComponent) != nil }
-                var copied: [URL] = []
-                var committed = false
-                do {
-                    for original in originals {
-                        let target = url.appendingPathComponent(original.lastPathComponent)
-                        try FileManager.default.copyItem(at: original, to: target); copied.append(target)
-                    }
-                    let newStore = try MeetingStore(root: url, encrypted: preferences.encrypted)
-                    _ = try await newStore.list()
-                    store = newStore; preferences.storageBookmark = bookmark
-                    scopedURL?.stopAccessingSecurityScopedResource(); scopedURL = access ? url : nil
-                    storageURL = url
-                    committed = true
-                    for original in originals {
-                        do { try FileManager.default.removeItem(at: original) }
-                        catch { notice = "Your meetings were moved. A duplicate remains in the previous folder and can be removed in Finder." }
-                    }
-                } catch {
-                    if !committed { for copiedURL in copied { try? FileManager.default.removeItem(at: copiedURL) } }
-                    throw error
-                }
-            } catch { if access { url.stopAccessingSecurityScopedResource() }; notice = error.localizedDescription }
-            busy = false
-        }
+    func refreshTasks() async {
+        if isDemo { tasks = demoTasks(); return }
+        guard let store else { tasks = []; return }
+        let order = Dictionary(uniqueKeysWithValues: meetings.enumerated().map { ($1.id, $0) })
+        tasks = await store.tasks().filter { order[$0.meetingID] != nil }
+            .sorted { (order[$0.meetingID] ?? 0, $0.line) < (order[$1.meetingID] ?? 0, $1.line) }
     }
+
+    // MARK: Small helpers
+
+    func copy(_ string: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(string, forType: .string) }
+    func meeting(_ id: UUID) -> Meeting? { meetings.first { $0.id == id } }
+    func template(for meeting: Meeting) -> NoteTemplate? { templates.first { $0.id == meeting.templateID } }
+    func reloadTemplates() { if !isDemo { templates = (try? Templates.load()) ?? templates } }
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
             if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-        } catch { notice = "Couldn't change launch at login. Check System Settings → General → Login Items." }
+        } catch { show(.error, "Couldn't change launch at login", detail: "Check System Settings → General → Login Items.") }
     }
-    func enableCalendar() {
-        Task {
-            preferences.calendarEnabled = await calendar.requestAccess()
-            if preferences.calendarEnabled {
-                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
-                scheduleNotifications()
-            }
-        }
-    }
-    func skip(_ event: CalendarMeeting?) {
-        if let event { skipped.insert(event.id); UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [event.id]) }
-        else { detectedCall = true }
-        dismissCard?()
-    }
-    func scheduleNotifications() {
-        guard preferences.calendarEnabled else { return }
-        let center = UNUserNotificationCenter.current()
-        center.removeAllPendingNotificationRequests()
-        for event in calendar.meetings where event.start.timeIntervalSinceNow > 60 && !skipped.contains(event.id) {
-            let content = UNMutableNotificationContent(); content.title = "Meeting in one minute"
-            content.body = event.title; content.categoryIdentifier = "MEETING"; content.userInfo = ["event": event.id]
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: event.start.timeIntervalSinceNow - 60, repeats: false)
-            center.add(UNNotificationRequest(identifier: event.id, content: content, trigger: trigger))
+}
+
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case general, recording, models, templates, privacy
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .recording: "Recording"
+        case .models: "AI Models"
+        case .templates: "Templates"
+        case .privacy: "Privacy"
         }
     }
-    func notify(title: String, body: String, id: String) {
-        let content = UNMutableNotificationContent(); content.title = title; content.body = body; content.userInfo = ["meeting": id]
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "notes-" + id, content: content, trigger: nil))
-    }
-    func copy(_ string: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(string, forType: .string) }
-    private func tick() {
-        tickCount += 1
-        if capture.isRecording {
-            elapsed = Date.now.timeIntervalSince(capture.startedAt ?? .now)
-            if tickCount % 15 == 0, !checkpointing, let meeting = current {
-                checkpointing = true
-                var copy = meeting; copy.userNotes = liveNotes; copy.audioOffsets = capture.audioOffsets
-                Task {
-                    do { try await store?.save(copy, transcript: capture.transcript) }
-                    catch { notice = "Couldn't save the latest transcript. Check available disk space." }
-                    checkpointing = false
-                }
-            }
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .recording: "waveform"
+        case .models: "cpu"
+        case .templates: "doc.text"
+        case .privacy: "lock"
         }
-        if tickCount % 60 == 0, preferences.calendarEnabled { calendar.refresh(); scheduleNotifications() }
-        guard tickCount % 5 == 0 else { return }
-        let callApps = preferences.detectCalls || capture.isRecording ? CallDetector.activeApps(terms: preferences.captureApps) : []
-        if capture.isRecording {
-            let micActive = CallDetector.microphoneInUse(terms: preferences.captureApps)
-            capture.checkSilence(duringCall: !callApps.isEmpty)
-            if micActive { hadCall = true; micReleasedAt = nil }
-            else if hadCall {
-                micReleasedAt = micReleasedAt ?? .now
-                if Date.now.timeIntervalSince(micReleasedAt!) >= 60 { stop(); return }
-            }
-            if let event = activeEvent, Date.now > event.end.addingTimeInterval(600) { stop() }
-            return
-        }
-        guard !busy && !capture.isPreparing else { return }
-        if preferences.calendarEnabled {
-            for event in calendar.meetings where !skipped.contains(event.id) && !autoStarted.contains(event.id) {
-                let until = event.start.timeIntervalSinceNow
-                if until <= 60 && until > 0 && !reminded.contains(event.id) {
-                    reminded.insert(event.id); showCard?(event, nil)
-                }
-                if until <= 0 && until > -15 && (autoOverrides[event.id] ?? preferences.autoRecord) {
-                    autoStarted.insert(event.id); start(event: event, automatic: true); return
-                }
-            }
-        }
-        let armed = calendar.meetings.contains { $0.start.timeIntervalSinceNow < 120 && $0.end > .now }
-        if preferences.detectCalls && !callApps.isEmpty && !armed && !detectedCall {
-            detectedCall = true; showCard?(nil, callApps.first)
-        }
-        if callApps.isEmpty { detectedCall = false }
     }
 }

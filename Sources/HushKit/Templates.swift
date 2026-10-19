@@ -15,6 +15,11 @@ public struct NoteTemplate: Identifiable, Sendable, Equatable {
         instruction = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         layout = parts.dropFirst().joined(separator: "\n---\n")
     }
+    public var isBuiltIn: Bool { Templates.builtIns.contains { $0.0 == id } }
+    public var isModified: Bool {
+        guard let original = Templates.builtIns.first(where: { $0.0 == id })?.1 else { return false }
+        return NoteTemplate(url: url, contents: original) != self
+    }
     public func render(_ notes: MeetingNotes) -> String {
         func bullets(_ lines: [String]) -> String { lines.isEmpty ? "Nothing noted." : lines.map { "- " + $0 }.joined(separator: "\n") }
         let actions = notes.actionItems.map { item in
@@ -43,6 +48,39 @@ public enum Templates {
         return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "md" }.map { NoteTemplate(url: $0, contents: try String(contentsOf: $0, encoding: .utf8)) }
             .sorted { (order.firstIndex(of: $0.id) ?? 100, $0.name) < (order.firstIndex(of: $1.id) ?? 100, $1.name) }
+    }
+    /// Placeholders a layout can use, with a short description for the editor.
+    public static let placeholders: [(key: String, label: String)] = [
+        ("title", "Title"), ("summary", "Summary"), ("key_points", "Key points"), ("decisions", "Decisions"),
+        ("decisions_table", "Decisions table"), ("action_items", "Action items"), ("open_questions", "Open questions"),
+        ("user_notes", "Your notes, filled in")
+    ]
+    public static func contents(name: String, instruction: String, layout: String) -> String {
+        "# " + name.replacingOccurrences(of: "\n", with: " ") + "\n\n" + instruction.trimmingCharacters(in: .whitespacesAndNewlines) + "\n---\n" + layout
+    }
+    /// Writes an edited template back to its file.
+    public static func save(_ template: NoteTemplate) throws {
+        let name = template.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw HushError.message("Give the template a name.") }
+        guard !template.layout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw HushError.message("Add a layout so Hush knows how to arrange the notes.") }
+        try contents(name: name, instruction: template.instruction, layout: template.layout).write(to: template.url, atomically: true, encoding: .utf8)
+    }
+    public static func create(named name: String, directory: URL = directory) throws -> NoteTemplate {
+        let id = "custom-" + String(UUID().uuidString.prefix(8)).lowercased()
+        let url = directory.appendingPathComponent(id + ".md")
+        let text = contents(name: name, instruction: "Describe what these notes should focus on.", layout: "# {{title}}\n\n{{summary}}\n\n## Action items\n{{action_items}}\n\n{{user_notes}}")
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        return NoteTemplate(url: url, contents: text)
+    }
+    /// Removes a template you made. Built-in templates can only be restored, not removed.
+    public static func remove(_ template: NoteTemplate) throws {
+        guard !template.isBuiltIn else { throw HushError.message("Built-in templates can't be removed. Restore it instead.") }
+        try FileManager.default.removeItem(at: template.url)
+    }
+    public static func restore(_ template: NoteTemplate) throws -> NoteTemplate {
+        guard let original = builtIns.first(where: { $0.0 == template.id })?.1 else { return template }
+        try original.write(to: template.url, atomically: true, encoding: .utf8)
+        return NoteTemplate(url: template.url, contents: original)
     }
     public static func duplicate(_ template: NoteTemplate) throws -> URL {
         let url = template.url.deletingLastPathComponent().appendingPathComponent(template.id + "-" + String(UUID().uuidString.prefix(6)) + ".md")

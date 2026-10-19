@@ -17,41 +17,47 @@ Requires Xcode 26 with the macOS 26 SDK and an Apple Silicon Mac.
 open build/Hush.app
 ```
 
-Or open `Hush.xcodeproj`, select the shared **Hush** scheme, and run. The app lives in the menu bar; closing the notebook keeps it available. First launch opens the three-step permission setup. Every step is skippable.
+The app's accent colour lives in `Resources/Assets.xcassets`; `build.sh` compiles it with `actool`.
 
-To inspect the notebook with disposable, in-memory sample meetings:
+Or open `Hush.xcodeproj`, select the shared **Hush** scheme, and run. The app lives in the menu bar and shows a Dock icon while one of its windows is open. First launch opens a five-step welcome. Every step is skippable.
+
+To try the notebook with disposable, in-memory sample meetings:
 
 ```sh
-open -n build/Hush.app --args --demo
-open -n build/Hush.app --args --demo --dark
+./scripts/preview.sh
+./scripts/preview.sh --dark
+./scripts/preview.sh --demo-open recording
 ```
 
-Preview mode does not record, read calendars, save sample meetings, or change preferences. The recording button is intentionally unavailable in preview mode. Quit the preview before opening the real app.
-
-Add `--reduce-motion` to preview the static voice indicators and crossfades without changing macOS preferences.
+Preview mode never records, reads your calendar, saves anything, or reads or changes preferences. **Record** plays a simulated meeting (scripted transcript, animated levels, simulated note writing) with no microphone or files. `--demo-open` opens one surface for review: `tasks`, `transcript`, `recording`, `popover`, `card`, `onboarding` or `settings:<general|recording|models|templates|privacy>`. Add `--demo-meeting`, `--demo-failure` or `--reduce-motion` to inspect those states. The preview copy is re-signed without the hardened runtime so ad-hoc builds can load Sparkle; quit it from its menu bar icon.
 
 ## Use
 
-Click the outlined circle in the menu bar, choose the spoken language, and click **Record a meeting**. The microphone is **Me**; selected call applications are **Them**. Both tracks remain separate. Use headphones, and obtain any consent needed for your conversation.
+Click **Record** in the menu bar popover, the notebook toolbar or Home, or press **⌃⌥⌘R** from any app. The microphone is **Me**; selected call apps are **Them**. Both tracks stay separate. Use headphones, and obtain any consent needed for your conversation.
 
-Write an agenda, names, questions or rough thoughts in **Side notes**, before or after a summary or while recording. The notebook opens a side panel in wide windows and an inline editor in smaller windows; its toolbar can hide it. Edits autosave to the meeting and are searchable. The popover edits the same notes. **Use as AI context** controls whether they accompany the transcript. Original side notes are preserved separately from generated notes. After changing included context, choose **Update AI notes**; existing AI output remains until regeneration succeeds. Hush finishes pending saves before quitting.
+While recording, the meeting page shows the elapsed time, the two voice lines, a notes editor and the live transcript side by side. Type names, decisions or questions; Hush uses them as an outline when it writes the notes. Stop from the page, the popover, the toolbar, **⌘.** or the shortcut. Recording also stops cleanly when the call releases its microphone for a minute, when a calendar meeting runs ten minutes over, when the disk is nearly full, or when the Mac goes to sleep. Hush keeps the Mac awake while it records. Switching microphones or speakers mid-call (AirPods, a headset) carries on with the new device.
 
-While recording, type your own outline in the popover or notebook. Stop from either surface. Apple Speech streams locally; cloud speech services transcribe the saved tracks after Stop. The selected notes provider then writes structured notes. If a model is unavailable, the transcript remains available and the app offers a retry. Cloud providers are never selected automatically.
+After Stop, notes are written in the background. You can start the next recording straight away; meetings queue and show their progress (for example "Reading part 3 of 8") in the page, the sidebar and the popover. Long meetings are split into parts with a separate time limit for each part, so an hour-long call finishes instead of timing out. If Hush quits mid-meeting or mid-notes, the next launch repairs the saved audio and, with on-device providers, finishes the notes automatically; cloud setups show **Try again**.
 
-Double-click a meeting title to rename it. Search covers titles, notes, handwritten outlines and transcripts. Choose a template to regenerate notes from the saved transcript. The export menu copies Markdown or transcripts, saves Markdown or a paginated PDF, and reveals the meeting folder.
+**Home** shows what's next on your calendar with **Join & record**, open action items and recent meetings. **Action items** collects every checklist line across meetings. Check items off anywhere, or add them to Reminders. Checked items stay checked when notes are rewritten with the same wording.
+
+Each meeting page has **Notes** and **Transcript** (⌘1, ⌘2). Click the title to rename it. Choose a template to rewrite the notes. The new layout appears immediately from the existing notes, then the model refines them. Edit notes by hand (⌘E); Hush asks before replacing hand edits. The transcript can be searched, its speakers renamed (for example "Them" → "Priya"), and, when audio is kept, played back from any line. **Side notes** sit in the inspector (⌥⌘I) and autosave; **Use when writing notes** controls whether they guide the model. Search (sidebar) covers titles, notes, side notes, invitees and transcripts and shows the matching excerpt.
+
+**Share** copies Markdown, copies formatted notes for Mail, Notes, Docs or Slack, saves Markdown or a paginated PDF, starts an email, and copies or saves the transcript. Exports use the meeting's own title and speaker names.
 
 ## Settings
 
-- **General:** launch at login, temporary audio retention, consent line, storage location and editable templates.
-- **Meetings:** calendar, optional automatic recording, ad-hoc call prompts, and application capture selection. Individual upcoming meetings can override automatic recording. Unscheduled calls always ask. Browser capture includes every audio-producing tab of that browser.
-- **Models:** Apple Speech; Deepgram, ElevenLabs Scribe, Gemini or OpenAI transcription. Apple Foundation Models; Ollama or LM Studio / llama.cpp local models; Anthropic, OpenAI, Gemini or a remote OpenAI-compatible notes endpoint. Enter keys in the secure fields and save them to the Keychain. Test sends synthetic content, may incur provider charges, and never uses a saved meeting.
-- **Privacy:** storage usage, optional AES-GCM encryption, reveal files and confirmed deletion.
+- **General:** open at login, Dock icon while windows are open, menu bar timer, the ⌃⌥⌘R shortcut, updates.
+- **Recording:** spoken language, temporary audio retention, consent line, calendar, a minute's reminder, automatic recording, call detection and which apps count as the other side.
+- **AI Models:** Apple Speech; Deepgram, ElevenLabs Scribe, Gemini or OpenAI transcription. Apple Foundation Models; Ollama or LM Studio / llama.cpp local models; Anthropic, OpenAI, Gemini or a remote OpenAI-compatible notes endpoint. Keys go to the Keychain. The top of the tab always says where meeting data goes. Tests send synthetic content and may incur provider charges. Changes apply to the next recording; meetings already queued keep the providers you confirmed.
+- **Templates:** edit name, focus instruction and layout in the app, insert placeholders, create, duplicate, remove your own, and restore built-ins.
+- **Privacy:** storage size and location, moving the store, encryption, what Hush does and doesn't do, diagnostic logs and deleting everything.
 
-Use a provider model available to your account. Notes model names are editable. Remote OpenAI-compatible servers must expose a valid HTTPS endpoint and support JSON-schema responses. Certificate validation stays enabled.
+Use a provider model available to your account. Notes model names are editable. The Anthropic default is `claude-opus-5-5`, with server-side refusal fallback enabled for models that support it. Remote OpenAI-compatible servers must expose a valid HTTPS endpoint and support JSON-schema responses. Certificate validation stays enabled.
 
 ### Local AI models
 
-Choose **Settings → Models → Notes → Ollama (local)** or **LM Studio / llama.cpp (local)**. Open your local runner, download/load a chat or instruction model, then click **Find models** and select it. **Test local notes** sends only a short synthetic example. Hush does not download large models or install runners automatically. Small models can omit details; review the output and choose a more capable model if needed.
+Choose **Settings → AI Models → Notes → Ollama (local)** or **LM Studio / llama.cpp (local)**. Open your local runner, download/load a chat or instruction model, then click **Find models** and select it. **Test local notes** sends only a short synthetic example. Hush does not download large models or install runners automatically. Small models can omit details; review the output and choose a more capable model if needed.
 
 - Ollama defaults to `http://127.0.0.1:11434`. It uses the native model listing, routing checks and JSON-schema chat API. Downloaded Llama, Gemma, Qwen and other chat models can be selected. Cloud-backed and embedding-only Ollama models are refused before any meeting text is sent.
 - LM Studio defaults to `http://127.0.0.1:1234/v1`. A llama.cpp server can use `http://127.0.0.1:8080/v1`. Both use model discovery and OpenAI-compatible structured output. If your local server requires a token, store it in the optional Keychain field.
@@ -78,7 +84,7 @@ All first-party meeting/provider HTTP goes through `NetworkClient`, with exact c
 HUSH_RUN_MODEL_TESTS=1 ./scripts/test.sh
 ```
 
-The first command runs the inherited Muesli tests, Hush storage/encryption/search/calendar/provider-boundary tests, PDF pagination tests, and a source-level network audit. The second additionally exercises the real Apple notes model with synthetic meeting speech; it requires Apple Intelligence to be ready. `HUSH_RUN_LOCAL_MODEL_TESTS=1 ./scripts/test.sh` runs a real local Ollama summarization with synthetic context, using `llama3.2:latest` by default or `HUSH_LOCAL_MODEL` if set. These tests do not download models.
+The first command runs the inherited Muesli tests, the 2.0 reliability and notebook tests (damaged-store tolerance, resilient preferences, WAV repair, search excerpts, checklists, queueing, templates, per-request deadlines), Hush storage/encryption/search/calendar/provider-boundary tests, PDF pagination tests, and a source-level network audit. The second additionally exercises the real Apple notes model with synthetic meeting speech; it requires Apple Intelligence to be ready. `HUSH_RUN_LOCAL_MODEL_TESTS=1 ./scripts/test.sh` runs a real local Ollama summarization with synthetic context, using `llama3.2:latest` by default or `HUSH_LOCAL_MODEL` if set. These tests do not download models.
 
 See [VERIFICATION.md](VERIFICATION.md) for the actual validation performed and remaining hardware/account checks. No automated test records a user's microphone or call, uploads a real meeting, or writes a real calendar event.
 
@@ -113,7 +119,7 @@ For an installation rehearsal before existing clients see the update, set `HUSH_
 
 ## Project
 
-`Sources/HushApp` contains the four native surfaces, onboarding, the notebook design system, application orchestration and exports. `Sources/HushKit` contains protected storage, Keychain access, providers, networking, templates, calendar and call detection. `Vendor/Muesli` retains Muesli's core notes/transcript types, dual audio capture, PCM conversion, speech transcription and map/reduce logic. `scripts/generate-project.py` regenerates the Xcode project after adding app source files.
+`Sources/HushApp` contains the notebook (sidebar, Home, Action items, meeting page, transcript, inspector), the menu bar popover and meeting card, settings and template editor, onboarding, the design system (`DesignTokens.swift`, `Components.swift`), application state split by concern (`AppState+Recording`, `+Processing`, `+Library`) and exports. `Sources/HushKit` contains protected storage, Keychain access, providers, networking, templates, calendar and call detection. `Vendor/Muesli` retains Muesli's core notes/transcript types, dual audio capture, PCM conversion, speech transcription and map/reduce logic. `scripts/generate-project.py` regenerates the Xcode project after adding app source files.
 
 Muesli source was imported from [alimuqeem/muesli](https://github.com/alimuqeem/muesli), commit `9929b4fb883d11e2d41c7eebea091ee687ce2ebd`. Its MIT notice is preserved in `Vendor/Muesli/LICENSE` and bundled with Hush. The CLI, Whisper subprocess integration and unrelated action integrations are not exposed by Hush.
 

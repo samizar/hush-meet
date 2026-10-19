@@ -8,6 +8,8 @@ public final class DiagnosticLog: Sendable {
         case captureStarted, stopRequested, audioDrained, speechFinished, speechTimedOut
         case processingFailed, processingCancelled, retryStarted, notesStarted, notesFinished
         case modelCheckStarted, modelCheckFinished, modelCheckFailed
+        case microphoneChanged, microphoneInterrupted, stoppedForSleep, audioRepaired
+        case recoveryQueued, storeDamaged, lowDiskSpace, notesRequest
     }
     public static let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Hush/Diagnostics", isDirectory: true)

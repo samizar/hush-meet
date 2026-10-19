@@ -81,6 +81,10 @@ public enum Prompts {
         day.dateFormat = "EEEE yyyy-MM-dd HH:mm"
         var lines = ["Meeting: \(context.title ?? "(untitled)")",
                      "Started: \(day.string(from: context.start)) (\(context.timeZone.identifier))"]
+        let invitees = context.attendees.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        if !invitees.isEmpty {
+            lines.append("Invited (from the calendar, may not all have attended): " + escaped(invitees.prefix(20).joined(separator: ", ")))
+        }
 
         // A short calendar is far more reliable than asking a model to do
         // weekday arithmetic, especially a small on-device one.

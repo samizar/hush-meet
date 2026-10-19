@@ -12,6 +12,10 @@ cp Vendor/Muesli/LICENSE "$TASK_APP/Contents/Resources/Muesli-LICENSE.txt"
 cp Vendor/Sparkle-LICENSE.txt "$TASK_APP/Contents/Resources/Sparkle-LICENSE.txt"
 cp Resources/PrivacyInfo.xcprivacy "$TASK_APP/Contents/Resources/PrivacyInfo.xcprivacy"
 if [[ -f Resources/Hush.icns ]]; then cp Resources/Hush.icns "$TASK_APP/Contents/Resources/Hush.icns"; fi
+TASK_ASSETS_PLIST=$(mktemp "${TMPDIR:-/tmp}/hush-assets.XXXXXX")
+xcrun actool Resources/Assets.xcassets --compile "$TASK_APP/Contents/Resources" --platform macosx --minimum-deployment-target 26.0 \
+    --accent-color AccentColor --output-partial-info-plist "$TASK_ASSETS_PLIST" > /dev/null
+rm -f "$TASK_ASSETS_PLIST"
 TASK_SPARKLE=(.build/artifacts/**/Sparkle.framework(N/))
 if (( ${#TASK_SPARKLE} != 1 )); then print -u2 'Expected one resolved Sparkle framework.'; exit 1; fi
 mkdir -p "$TASK_APP/Contents/Frameworks"

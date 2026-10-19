@@ -1,6 +1,8 @@
 import Foundation
 import AVFoundation
 import MuesliCore
+import MuesliAudio
+import MuesliTranscribe
 
 public protocol TranscriptionProvider: Sendable {
     func transcribe(wav: Data, locale: String) async throws -> String
@@ -86,5 +88,63 @@ public enum WaveAudio {
             let bytes = Data(bytes: source[0], count: Int(buffer.frameLength) * 2)
             return (WaveAudio.encode(samples: bytes), start, Double(buffer.frameLength) / file.processingFormat.sampleRate)
         }
+    }
+}
+
+/// Transcribes saved Me/Them tracks after a recording, off the main thread. Used for cloud
+/// speech and for recovering meetings whose live transcript didn't finish.
+public struct FileTranscriber: Sendable {
+    public struct Track: Sendable {
+        public var speaker: Speaker
+        public var url: URL
+        public var offset: TimeInterval
+        public init(speaker: Speaker, url: URL, offset: TimeInterval) { self.speaker = speaker; self.url = url; self.offset = offset }
+    }
+    public let service: TranscriptionService
+    public init(service: TranscriptionService) { self.service = service }
+
+    public func transcribe(_ tracks: [Track], locale identifier: String, startedAt: Date,
+                           progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> Transcript {
+        var transcript = Transcript(startedAt: startedAt, locale: identifier)
+        let durations = tracks.map { Self.duration(of: $0.url) }
+        let total = max(1, durations.reduce(0, +))
+        var done = 0.0
+        for (index, track) in tracks.enumerated() {
+            try Task.checkCancellation()
+            let base = done
+            if service == .apple {
+                let locale = try await StreamTranscriber.prepare(locale: Locale(identifier: identifier))
+                let url = track.url, speaker = track.speaker
+                let length = max(1, durations[index])
+                let segments = try await AsyncDeadline.run(for: .seconds(max(120, length * 2))) {
+                    var result: [TranscriptSegment] = []
+                    for try await segment in StreamTranscriber(speaker: speaker, locale: locale).transcribe(try AudioFileSource.chunks(url: url)) {
+                        result.append(segment)
+                        progress(min(1, (base + min(segment.end, length)) / total))
+                    }
+                    return result
+                }
+                for segment in segments {
+                    var aligned = segment; aligned.start += track.offset; aligned.end += track.offset; transcript.append(aligned)
+                }
+            } else {
+                let provider = CloudTranscriptionProvider(service: service)
+                for try await (wav, start, duration) in try WaveAudio.chunks(file: track.url) {
+                    try Task.checkCancellation()
+                    progress(min(1, (base + start) / total))
+                    if wav.dropFirst(44).allSatisfy({ $0 == 0 }) { continue }
+                    let text = try await provider.transcribe(wav: wav, locale: identifier)
+                    transcript.append(TranscriptSegment(speaker: track.speaker, start: start + track.offset, end: start + duration + track.offset, text: text))
+                }
+            }
+            done += durations[index]
+            progress(min(1, done / total))
+        }
+        return transcript
+    }
+
+    static func duration(of url: URL) -> TimeInterval {
+        guard let file = try? AVAudioFile(forReading: url) else { return 0 }
+        return Double(file.length) / max(1, file.processingFormat.sampleRate)
     }
 }

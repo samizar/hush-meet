@@ -17,7 +17,7 @@ for file in sources:
     source_refs.append(ref)
     build_sources.append(obj('build-' + file.name, f'isa = PBXBuildFile; fileRef = {ref};'))
 resources = []
-for file, file_type in [('Resources/Hush.icns','image.icns'),('Resources/PrivacyInfo.xcprivacy','text.xml'),('Vendor/Muesli/LICENSE','text'),('Vendor/Sparkle-LICENSE.txt','text')]:
+for file, file_type in [('Resources/Assets.xcassets','folder.assetcatalog'),('Resources/Hush.icns','image.icns'),('Resources/PrivacyInfo.xcprivacy','text.xml'),('Vendor/Muesli/LICENSE','text'),('Vendor/Sparkle-LICENSE.txt','text')]:
     ref = obj(file, f'isa = PBXFileReference; lastKnownFileType = {file_type}; path = "{file}"; sourceTree = SOURCE_ROOT;')
     source_refs.append(ref)
     resources.append(obj('resource-' + file, f'isa = PBXBuildFile; fileRef = {ref};'))
@@ -36,10 +36,10 @@ link_phase = obj('link-phase', f'isa = PBXFrameworksBuildPhase; buildActionMask 
 configs, project_configs = [], []
 for name in ['Debug','Release']:
     settings = '''ARCHS = arm64; CODE_SIGN_IDENTITY = "-"; CODE_SIGN_STYLE = Manual; CODE_SIGN_ENTITLEMENTS = Resources/Hush.entitlements;
-    DEVELOPMENT_TEAM = ZUT6837GB5; COMBINE_HIDPI_IMAGES = YES; CURRENT_PROJECT_VERSION = 8; ENABLE_APP_SANDBOX = YES; ENABLE_HARDENED_RUNTIME = YES;
+    DEVELOPMENT_TEAM = ZUT6837GB5; COMBINE_HIDPI_IMAGES = YES; CURRENT_PROJECT_VERSION = 9; ENABLE_APP_SANDBOX = YES; ENABLE_HARDENED_RUNTIME = YES;
     GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Resources/Info.plist; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-    MACOSX_DEPLOYMENT_TARGET = 26.0; MARKETING_VERSION = 1.2.0; PRODUCT_BUNDLE_IDENTIFIER = app.hush.mac; PRODUCT_NAME = Hush;
-    SDKROOT = macosx; SUPPORTED_PLATFORMS = macosx; SWIFT_VERSION = 6.0; SWIFT_STRICT_CONCURRENCY = complete;'''
+    MACOSX_DEPLOYMENT_TARGET = 26.0; MARKETING_VERSION = 2.0.0; PRODUCT_BUNDLE_IDENTIFIER = app.hush.mac; PRODUCT_NAME = Hush;
+    SDKROOT = macosx; SUPPORTED_PLATFORMS = macosx; SWIFT_VERSION = 6.0; SWIFT_STRICT_CONCURRENCY = complete; ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;'''
     if name == 'Debug': settings += ' SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;'
     else: settings += ' SWIFT_OPTIMIZATION_LEVEL = "-O"; SWIFT_COMPILATION_MODE = wholemodule;'
     configs.append(obj('target-' + name, f'isa = XCBuildConfiguration; buildSettings = {{{settings}}}; name = {name};'))

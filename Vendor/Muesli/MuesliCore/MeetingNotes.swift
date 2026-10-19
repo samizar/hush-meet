@@ -8,12 +8,15 @@ public struct MeetingContext: Sendable, Equatable {
     public var timeZone: TimeZone
     /// The user's own rough notes, if any. Muesli's job is to enhance these.
     public var userNotes: String?
+    /// Hush: invitees from the calendar event, so owners can be named correctly.
+    public var attendees: [String]
 
-    public init(title: String? = nil, start: Date, timeZone: TimeZone = .current, userNotes: String? = nil) {
+    public init(title: String? = nil, start: Date, timeZone: TimeZone = .current, userNotes: String? = nil, attendees: [String] = []) {
         self.title = title
         self.start = start
         self.timeZone = timeZone
         self.userNotes = userNotes
+        self.attendees = attendees
     }
 
     var hasUserNotes: Bool {

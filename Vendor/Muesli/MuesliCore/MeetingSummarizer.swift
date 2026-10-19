@@ -57,6 +57,15 @@ public struct MeetingSummarizer: Sendable {
         self.enforceMergeBudget = enforceMergeBudget
     }
 
+    /// Hush: how many transcript passes a meeting needs before merging, for progress display.
+    /// Returns 1 when the whole transcript fits in one request.
+    public static func plannedParts(_ transcript: Transcript, context: MeetingContext, modelBudget: Int) -> Int {
+        let lines = transcript.turns().map { "[\(Transcript.timestamp($0.start))] \($0.speaker.label): \($0.text)" }
+        let budget = max(minimumBudget, modelBudget - (Prompts.notesBlock(context)?.count ?? 0))
+        guard lines.joined(separator: "\n").count > budget else { return 1 }
+        return TranscriptChunker.chunks(lines: lines, maxCharacters: budget).count
+    }
+
     public func summarize(_ transcript: Transcript, context: MeetingContext) async throws -> SummaryResult {
         let lines = transcript.turns().map {
             "[\(Transcript.timestamp($0.start))] \($0.speaker.label): \($0.text)"
@@ -141,7 +150,7 @@ public struct MeetingSummarizer: Sendable {
             let final = chunks.count == 1
             var next: [GeneratedNotes] = []
             for chunk in chunks {
-                let partContext = MeetingContext(title: context.title, start: context.start, timeZone: context.timeZone, userNotes: context.userNotes)
+                let partContext = MeetingContext(title: context.title, start: context.start, timeZone: context.timeZone, userNotes: context.userNotes, attendees: context.attendees)
                 let prompt = "Merge these extracted meeting facts. Remove duplicates, retain owners and exact deadlines. Keep the result concise.\n" +
                     Prompts.single(transcript: "<partial_notes>\n" + chunk + "\n</partial_notes>", context: partContext)
                 next.append(try await run(prompt))
