@@ -6,6 +6,46 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>Hush</title>
         <item>
+            <title>2.0.0</title>
+            <pubDate>Mon, 19 Oct 2026 17:41:50 +0300</pubDate>
+            <link>https://github.com/samizar/hush-meet/releases</link>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[Hush 2.0 is a complete overhaul: a new notebook, notes that never hold up your next call, and a lot more resilience.
+
+**A new notebook**
+- A native sidebar with search excerpts, a Home page (start recording, what's coming up with Join & record, open action items, recent meetings) and an Action items list across every meeting.
+- Each meeting has Notes and Transcript views. Check off action items, edit notes by hand, rename the meeting with a click, and rename speakers ("Them" → "Priya").
+- While recording, your notes and the live transcript sit side by side under a large timer.
+- Search, find in transcript, and play back kept audio from any line.
+- A redesigned menu bar popover, meeting card and welcome flow, settings with an in-app template editor, and a calmer graphite accent.
+
+**Ask about a meeting**
+- A new Ask tab answers questions about one meeting from its notes, side notes and transcript ("What did we decide?", "What do I owe people?"), with timestamps you can follow back to the conversation.
+- It uses your chosen notes model. With the defaults, questions are answered entirely on this Mac. Cloud models ask before anything is sent, and answers are only kept if you add them to your side notes.
+
+**Works the way you work**
+- Start the next recording while the last meeting's notes are still being written. Progress shows as "Reading part 3 of 8".
+- Long meetings finish: each part of a long transcript gets its own time limit.
+- Copy formatted notes for Mail, Notes, Docs or Slack, start an email, save the transcript, or send action items to Reminders.
+- Start and stop recording from anywhere with ⌃⌥⌘R. The menu bar shows elapsed time while recording. Hush appears in the Dock while a window is open. Each can be turned off in Settings.
+
+**More reliable**
+- Switching microphones or speakers mid-call (AirPods, a headset) keeps recording.
+- Recording stops cleanly before sleep, keeps the Mac awake while it runs, and checks for disk space.
+- If Hush quits mid-meeting, the next launch repairs the saved audio and, with on-device models, finishes the notes automatically.
+- One unreadable meeting no longer hides the rest, and settings can't be reset by a future update.
+- Side notes typed while notes are being written are kept.
+
+Your meetings, settings and templates carry over unchanged. Default models still run entirely on this Mac. The Anthropic default is now Claude Opus 5.5.
+
+Verified with 163 automated tests, an Apple-notarized build and signed updates. Apple Silicon; macOS 26 or later.
+]]></description>
+            <enclosure url="https://github.com/samizar/hush-meet/releases/download/v2.0.0/Hush.dmg" length="2889610" type="application/octet-stream" sparkle:edSignature="8X2fq0mEL/Od/YcNswxrc5ug1MYeLaQjKcYqkY2oy5LkE0xqzLJSmaFvI3dgFdqsddnh6qq2uvSX5E15ph14Dw=="/>
+        </item>
+        <item>
             <title>1.2.0</title>
             <pubDate>Thu, 15 Oct 2026 17:30:19 +0300</pubDate>
             <link>https://github.com/samizar/hush-meet/releases</link>
@@ -46,37 +86,9 @@ If version 1.1.0 is already stuck, force quit Hush once, reopen it, then choose 
 ]]></description>
             <enclosure url="https://github.com/samizar/hush-meet/releases/download/v1.1.1/Hush.dmg" length="2222633" type="application/octet-stream" sparkle:edSignature="5vrxRhzZMZBYuMuz1rsOJvsYlfIpsEkfu9OY2jWqK5UQgIj09idPH7Y24mcWro3ul+1WFrMheQghMs/xBqYZDg=="/>
         </item>
-        <item>
-            <title>1.1.0</title>
-            <pubDate>Thu, 15 Oct 2026 14:06:12 +0300</pubDate>
-            <link>https://github.com/samizar/hush-meet/releases</link>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[Hush now receives secure automatic updates from GitHub releases.
-
-### Automatic updates
-
-- Checks daily and downloads updates automatically by default.
-- Verifies a signed update feed and Ed25519-signed downloads before extraction.
-- Installs when Hush quits. Recording, transcription and note generation protect against update restarts.
-- Includes automatic-update controls in General settings and **Check for Updates…** in Settings and the Hush menu.
-- Keeps meeting content and provider keys out of update requests. System profiling stays disabled.
-
-**Coming from Hush 1.0? Install this DMG manually once.** Version 1.0 has no updater; 1.1 and later receive future releases automatically. Open the DMG and drag Hush into Applications, replacing the old app after quitting it. Existing notes and settings stay in their macOS container.
-
-**Requires macOS 26 or later and Apple Silicon.** The app, updater helpers and DMG are Developer ID signed and Apple-notarized. The DMG includes its notarization ticket and a SHA-256 checksum file accompanies the download.
-
-The 100-test suite passes, including five tests covering update checks, meeting protection and restart deferral. Release-specific installation verification is recorded in [VERIFICATION.md](https://github.com/samizar/hush-meet/blob/main/VERIFICATION.md).
-
-Future releases must use the signed publishing workflow documented in the [README](https://github.com/samizar/hush-meet#package-and-release), so automatic-update clients always receive a valid feed and signed payload.
-]]></description>
-            <enclosure url="https://github.com/samizar/hush-meet/releases/download/v1.1.0/Hush.dmg" length="2189543" type="application/octet-stream" sparkle:edSignature="cR0khhh3DRUEUu8NkOAi60J3W664HVmGJ64RxGVoBTxR8/MG4jeBw+wAmD9B+OBlMK3uSOwPBR734ObXEPXTBw=="/>
-        </item>
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: n2Hvj/jGoIbrnX6B4WHzHOreHSK4tR1ADLp7OY9FDFB1xi1MtbuC4vLl+77MGbngDhBQbCSLAyoASlh8ujsNDw==
-length: 6737
+edSignature: y7Cc/CcvLizKKtvQeaYcMMq4j9YVTWHaDBVLo1G4wxlwl+L/uykTnNu+hfGhU8XFU1Mz34ALzsAVVRkIVsTIBA==
+length: 7732
 -->
